@@ -22,6 +22,11 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+// Simple health check endpoint for Railway
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
     hour: "numeric",
