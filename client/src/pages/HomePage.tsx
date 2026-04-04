@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ import PerplexityAttribution from "@/components/PerplexityAttribution";
 import {
   ChefHat, Clock, Plus, Menu, X,
   CalendarClock, Flame, Moon, Sun, UtensilsCrossed, Info,
-  ShoppingCart, ExternalLink, Users, Link as LinkIcon
+  ShoppingCart, ExternalLink, Users, Link as LinkIcon, Zap
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -306,9 +307,9 @@ function RecipeCard({
           {/* Equipment / tag badges */}
           <div className="flex flex-wrap gap-1.5 mt-3">
             {recipe.equipment.map(eq => (
-              <Badge key={eq} variant="secondary" className="text-xs">{EQUIPMENT_ICONS[eq]} {EQUIPMENT_LABELS[eq]}</Badge>
+              <Badge key={eq} variant="secondary" className="text-xs">{EQUIPMENT_ICONS[eq as keyof typeof EQUIPMENT_ICONS] ?? ""} {EQUIPMENT_LABELS[eq as keyof typeof EQUIPMENT_LABELS] ?? eq}</Badge>
             ))}
-            {recipe.tags.map(tag => (
+            {recipe.tags.filter(tag => !recipe.equipment.includes(tag)).map(tag => (
               <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
             ))}
           </div>
@@ -442,6 +443,12 @@ function AddRecipeModal({ open, onClose, contributors }: { open: boolean; onClos
             </Select>
           </div>
         </div>
+        {(!form.name || form.equipment.length === 0) && (
+          <div className="text-xs text-destructive px-1 -mt-2 space-y-0.5">
+            {!form.name && <p>⚠ Recipe name is required</p>}
+            {form.equipment.length === 0 && <p>⚠ Select at least one piece of equipment</p>}
+          </div>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={() => mutation.mutate(form)} disabled={!form.name || form.equipment.length === 0 || mutation.isPending} className="bg-primary text-primary-foreground" data-testid="button-submit-recipe">
@@ -547,6 +554,7 @@ function SidebarContent({
 
 export default function HomePage() {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [darkMode, setDarkMode] = useState(window.matchMedia("(prefers-color-scheme: dark)").matches);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -669,6 +677,18 @@ export default function HomePage() {
             <button onClick={() => setDarkMode(d => !d)} className="md:hidden p-1.5 rounded-lg hover:bg-accent transition-colors text-muted-foreground" aria-label="Toggle dark mode">
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
+            {/* Parallel Cooking entry point */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 text-xs border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+              onClick={() => navigate("/parallel")}
+              data-testid="button-parallel-cook"
+            >
+              <Zap size={13} />
+              <span className="hidden sm:inline">Parallel Cook</span>
+              <span className="sm:hidden">Cook</span>
+            </Button>
             <Button size="sm" className="bg-primary text-primary-foreground gap-1.5 text-xs" onClick={() => setShowAddModal(true)} data-testid="button-add-recipe">
               <Plus size={14} /> <span className="hidden sm:inline">Add Recipe</span><span className="sm:hidden">Add</span>
             </Button>
@@ -771,9 +791,6 @@ export default function HomePage() {
             <p className="text-muted-foreground/60">
               Amazon affiliate disclosure: we earn a small commission on qualifying purchases at no extra cost to you.
             </p>
-          </div>
-          <div className="mt-3 text-center">
-            <PerplexityAttribution />
           </div>
         </footer>
       </main>
