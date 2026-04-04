@@ -8,6 +8,7 @@ export interface IStorage {
   getContributors(): Contributor[];
   getContributor(id: number): Contributor | undefined;
   createContributor(data: InsertContributor): Contributor;
+  deleteContributor(id: number): boolean;
 
   // Recipes
   getRecipes(): Recipe[];
@@ -34,6 +35,11 @@ export class DatabaseStorage implements IStorage {
 
   createContributor(data: InsertContributor): Contributor {
     return db.insert(contributors).values(data).returning().get();
+  }
+
+  deleteContributor(id: number): boolean {
+    const result = db.delete(contributors).where(eq(contributors.id, id)).run();
+    return result.changes > 0;
   }
 
   getRecipes(): Recipe[] {
