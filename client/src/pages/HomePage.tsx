@@ -1,25 +1,27 @@
-import { useState, useMemo, useEffect } from "react";
+/**
+ * Mean Cuisines — AllRecipes-style redesign
+ * Wizard flow: Equipment → Pantry → Recipes → Parallel Cook → Shopping List
+ */
+
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import PerplexityAttribution from "@/components/PerplexityAttribution";
 import {
-  ChefHat, Clock, Plus, Menu, X,
-  CalendarClock, Flame, Moon, Sun, UtensilsCrossed, Info,
-  ShoppingCart, ExternalLink, Users, Link as LinkIcon, Zap
+  ChefHat, Clock, Plus, Search, ShoppingCart, ExternalLink,
+  CheckCircle2, ChevronRight, ChevronLeft, Star,
+  Flame, Zap, Play, SkipForward, UtensilsCrossed,
+  Moon, Sun, Users, Link as LinkIcon, X, Timer,
+  ShoppingBag, Package, Minus,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -44,287 +46,858 @@ interface Recipe {
   createdAt: string;
 }
 
-interface ScheduleEntry {
+interface MasterTask {
+  startMinute: number;
+  durationMinutes: number;
   recipeId: number;
   recipeName: string;
-  startTime: string;
-  endTime: string;
-  equipment: string;
+  stepIndex: number;
+  instruction: string;
+  equipment: string | null;
+  type: "passive" | "active" | "consolidated";
+  consolidatedFrom?: string[];
+}
+
+interface ParallelPlan {
+  plan: MasterTask[];
+  totalMinutes: number;
+  recipeCount: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const EQUIPMENT_LABELS: Record<EquipmentKey, string> = {
-  oven: "Oven",
-  stove: "Stove",
-  airFryer: "Air Fryer",
-  counter: "Counter / No Heat",
-  instantPot: "Instant Pot",
-  microwave: "Microwave",
-};
-
-const EQUIPMENT_ICONS: Record<EquipmentKey, string> = {
-  oven: "🔥",
-  stove: "🍳",
-  airFryer: "💨",
-  counter: "🧴",
-  instantPot: "⚡",
-  microwave: "📡",
-};
-
-const TIME_OPTIONS = Array.from({ length: 30 }, (_, i) => {
-  const totalMins = (6 * 60) + i * 30;
-  const h = Math.floor(totalMins / 60) % 24;
-  const m = totalMins % 60;
-  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
-});
-
-const SERVING_MULTIPLIERS = [
-  { label: "Half (0.5x)", value: 0.5 },
-  { label: "Regular (1x)", value: 1 },
-  { label: "Double (2x)", value: 2 },
-  { label: "Triple (3x)", value: 3 },
-];
-
-// Amazon affiliate tag — replace with your own
 const AMAZON_AFFILIATE_TAG = "meancuisines-20";
 
-function getAmazonSearchUrl(ingredient: string) {
-  const query = encodeURIComponent(ingredient.trim());
-  return `https://www.amazon.com/s?k=${query}&tag=${AMAZON_AFFILIATE_TAG}`;
+const EQUIPMENT_INFO: Record<EquipmentKey, { label: string; icon: string; searchQuery: string; description: string }> = {
+  oven:       { label: "Oven",             icon: "🔥", searchQuery: "countertop+toaster+oven",       description: "Baking, roasting, broiling" },
+  stove:      { label: "Stove / Cooktop",  icon: "🍳", searchQuery: "electric+induction+cooktop",    description: "Sautéing, boiling, frying" },
+  airFryer:   { label: "Air Fryer",        icon: "💨", searchQuery: "air+fryer",                     description: "Crispy results, no oil needed" },
+  counter:    { label: "No Heat / Counter",icon: "🧴", searchQuery: "food+processor+blender",        description: "Mixing, chopping, assembling" },
+  instantPot: { label: "Instant Pot",      icon: "⚡", searchQuery: "instant+pot+pressure+cooker",   description: "Pressure cooking & slow cooking" },
+  microwave:  { label: "Microwave",        icon: "📡", searchQuery: "countertop+microwave",           description: "Quick heating & cooking" },
+};
+
+const RECIPE_PALETTE = [
+  { ring: "ring-orange-400", dot: "bg-orange-500", light: "bg-orange-50 dark:bg-orange-950/40", text: "text-orange-600 dark:text-orange-400", border: "border-orange-200 dark:border-orange-800", badge: "bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300" },
+  { ring: "ring-blue-400",   dot: "bg-blue-500",   light: "bg-blue-50 dark:bg-blue-950/40",     text: "text-blue-600 dark:text-blue-400",   border: "border-blue-200 dark:border-blue-800",   badge: "bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300" },
+  { ring: "ring-green-400",  dot: "bg-green-500",  light: "bg-green-50 dark:bg-green-950/40",   text: "text-green-600 dark:text-green-400",  border: "border-green-200 dark:border-green-800",  badge: "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300" },
+  { ring: "ring-purple-400", dot: "bg-purple-500", light: "bg-purple-50 dark:bg-purple-950/40", text: "text-purple-600 dark:text-purple-400", border: "border-purple-200 dark:border-purple-800", badge: "bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300" },
+  { ring: "ring-rose-400",   dot: "bg-rose-500",   light: "bg-rose-50 dark:bg-rose-950/40",     text: "text-rose-600 dark:text-rose-400",   border: "border-rose-200 dark:border-rose-800",   badge: "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300" },
+];
+
+const STEP_TYPE = {
+  passive:      { icon: "🔥", label: "Hands-off",  cls: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
+  active:       { icon: "✋", label: "Active prep", cls: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300" },
+  consolidated: { icon: "⚡", label: "Shared",      cls: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300" },
+};
+
+function fmtMins(m: number) {
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60), r = m % 60;
+  return r === 0 ? `${h}h` : `${h}h ${r}m`;
+}
+function fmtElapsed(s: number) {
+  const m = Math.floor(s / 60), sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
+function getAmazonUrl(q: string) {
+  return `https://www.amazon.com/s?k=${encodeURIComponent(q.trim())}&tag=${AMAZON_AFFILIATE_TAG}`;
+}
+function pantryMatch(recipe: Recipe, pantry: string[]): number {
+  if (recipe.ingredients.length === 0) return 0;
+  const lowerPantry = pantry.map(p => p.toLowerCase());
+  const matched = recipe.ingredients.filter(ing =>
+    lowerPantry.some(p => ing.name.toLowerCase().includes(p) || p.includes(ing.name.toLowerCase().split(" ")[0]))
+  );
+  return Math.round((matched.length / recipe.ingredients.length) * 100);
 }
 
-// ─── Ad Slot Component ─────────────────────────────────────────────────────────
-// Swap placeholder divs with real AdSense <ins> tags once approved.
-// To activate: uncomment the <ins> block and delete the placeholder div.
+// ─── Step Indicator ────────────────────────────────────────────────────────────
 
-function AdSlot({ slot, className = "", label = "Advertisement" }: { slot: string; className?: string; label?: string }) {
+function StepBar({ step, total }: { step: number; total: number }) {
+  const labels = ["Equipment", "Pantry", "Recipes", "Cook", "Shopping"];
   return (
-    <div className={`ad-slot ${className}`} data-ad-slot={slot} aria-label={label}>
-      {/* ── ADSENSE (uncomment after approval) ──────────────────────────
-      <ins
-        className="adsbygoogle"
-        style={{ display: "block" }}
-        data-ad-client="ca-pub-XXXXXXXXXXXXXXXX"
-        data-ad-slot={slot}
-        data-ad-format="auto"
-        data-full-width-responsive="true"
-      />
-      <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
-      ──────────────────────────────────────────────────────────────── */}
-
-      {/* Placeholder shown until AdSense is active */}
-      <div className="flex items-center justify-center bg-muted/40 border border-dashed border-border rounded-lg text-xs text-muted-foreground/50 select-none" style={{ minHeight: 90 }}>
-        Ad
-      </div>
+    <div className="flex items-center justify-center gap-0 w-full max-w-lg mx-auto px-4 py-3">
+      {labels.slice(0, total).map((label, i) => {
+        const idx = i + 1;
+        const active = idx === step;
+        const done = idx < step;
+        return (
+          <div key={idx} className="flex items-center gap-0 flex-1 min-w-0">
+            <div className="flex flex-col items-center flex-shrink-0">
+              <div className={[
+                "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all",
+                done ? "bg-primary text-primary-foreground" :
+                active ? "bg-primary text-primary-foreground ring-4 ring-primary/20" :
+                "bg-muted text-muted-foreground"
+              ].join(" ")}>
+                {done ? <CheckCircle2 size={14} /> : idx}
+              </div>
+              <span className={`text-[10px] mt-1 font-medium whitespace-nowrap hidden sm:block ${active ? "text-primary" : "text-muted-foreground"}`}>
+                {label}
+              </span>
+            </div>
+            {i < total - 1 && (
+              <div className={`h-0.5 flex-1 mx-1 mb-4 transition-all ${done ? "bg-primary" : "bg-border"}`} />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-// ─── Logo ─────────────────────────────────────────────────────────────────────
+// ─── STEP 1: Equipment ─────────────────────────────────────────────────────────
 
-function Logo({ size = 28 }: { size?: number }) {
+function StepEquipment({
+  equipment, onToggle, onNext,
+}: {
+  equipment: Record<EquipmentKey, boolean>;
+  onToggle: (k: EquipmentKey) => void;
+  onNext: () => void;
+}) {
+  const hasAny = Object.values(equipment).some(Boolean);
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-label="Mean Cuisines logo">
-      <circle cx="16" cy="16" r="15" fill="hsl(20 90% 42%)" />
-      <path d="M10 22 C10 16, 14 10, 16 10 C18 10, 22 16, 22 22" stroke="white" strokeWidth="2" strokeLinecap="round" />
-      <path d="M8 22 H24" stroke="white" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="16" cy="8" r="2" fill="white" />
-    </svg>
-  );
-}
-
-// ─── Schedule Timeline ─────────────────────────────────────────────────────────
-
-function ScheduleTimeline({ schedule, recipes }: { schedule: ScheduleEntry[]; recipes: Recipe[] }) {
-  if (schedule.length === 0) return null;
-  const recipeMap = Object.fromEntries(recipes.map(r => [r.id, r]));
-  const allTimes = schedule.flatMap(s => [s.startTime, s.endTime]).sort();
-  const minTime = allTimes[0];
-  const maxTime = allTimes[allTimes.length - 1];
-  const toMinutes = (t: string) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
-  const startMin = toMinutes(minTime);
-  const totalDuration = Math.max(toMinutes(maxTime) - startMin, 1);
-  const colors = ["bg-orange-500", "bg-amber-500", "bg-green-600", "bg-blue-500", "bg-purple-500", "bg-rose-500"];
-
-  return (
-    <div className="mt-2">
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs text-muted-foreground">{minTime}</span>
-        <span className="text-xs text-muted-foreground">{maxTime}</span>
+    <div className="max-w-2xl mx-auto px-4 py-6">
+      <div className="text-center mb-6">
+        <h2 className="text-2xl font-display font-bold mb-1">What's in your kitchen?</h2>
+        <p className="text-muted-foreground text-sm">Select the equipment you have available. We'll only show recipes you can actually make.</p>
       </div>
-      <div className="relative h-10 bg-accent rounded-lg overflow-hidden mb-3">
-        {schedule.map((entry, idx) => {
-          const left = ((toMinutes(entry.startTime) - startMin) / totalDuration) * 100;
-          const width = ((toMinutes(entry.endTime) - toMinutes(entry.startTime)) / totalDuration) * 100;
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
+        {(Object.entries(EQUIPMENT_INFO) as [EquipmentKey, typeof EQUIPMENT_INFO[EquipmentKey]][]).map(([key, info]) => {
+          const on = equipment[key];
           return (
             <div
-              key={entry.recipeId}
-              className={`absolute top-1 bottom-1 ${colors[idx % colors.length]} rounded flex items-center px-2 overflow-hidden`}
-              style={{ left: `${left}%`, width: `${Math.max(width, 6)}%` }}
-              title={`${entry.recipeName}: ${entry.startTime}–${entry.endTime}`}
+              key={key}
+              className={[
+                "relative rounded-xl border-2 p-4 cursor-pointer transition-all select-none",
+                on
+                  ? "border-primary bg-primary/5 shadow-sm"
+                  : "border-border bg-card hover:border-muted-foreground/40 hover:shadow-sm",
+              ].join(" ")}
+              onClick={() => onToggle(key)}
+              data-testid={`equipment-${key}`}
             >
-              <span className="text-white text-xs font-medium truncate">{entry.recipeName}</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="space-y-2">
-        {schedule.map((entry, idx) => {
-          const recipe = recipeMap[entry.recipeId];
-          return (
-            <div key={entry.recipeId} className="flex items-center gap-3 bg-background border border-border rounded-lg p-3">
-              <div className={`w-2 h-8 rounded-full flex-shrink-0 ${colors[idx % colors.length]}`} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold truncate">{entry.recipeName}</p>
-                <p className="text-xs text-muted-foreground">{EQUIPMENT_ICONS[entry.equipment as EquipmentKey] || "🍽️"} {entry.startTime} → {entry.endTime}</p>
+              {on && (
+                <div className="absolute top-3 right-3 w-5 h-5 rounded-full bg-primary flex items-center justify-center">
+                  <CheckCircle2 size={12} className="text-primary-foreground" />
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{info.icon}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm">{info.label}</p>
+                  <p className="text-xs text-muted-foreground">{info.description}</p>
+                </div>
               </div>
-              {recipe?.contributor && (
-                <Avatar className="w-6 h-6 flex-shrink-0">
-                  <AvatarImage src={recipe.contributor.photoUrl} alt={recipe.contributor.name} />
-                  <AvatarFallback className="text-xs">{recipe.contributor.name[0]}</AvatarFallback>
-                </Avatar>
+              {!on && (
+                <a
+                  href={getAmazonUrl(info.searchQuery)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={e => e.stopPropagation()}
+                  className="flex items-center gap-1 mt-2 text-[11px] text-primary font-medium hover:underline w-fit"
+                >
+                  <ShoppingCart size={10} /> Buy on Amazon <ExternalLink size={9} />
+                </a>
               )}
             </div>
           );
         })}
       </div>
-      <p className="text-xs text-muted-foreground mt-2 text-center">~{totalDuration} min total session</p>
+
+      <Button
+        size="lg"
+        className="w-full gap-2 bg-primary text-primary-foreground font-bold"
+        disabled={!hasAny}
+        onClick={onNext}
+        data-testid="btn-equipment-next"
+      >
+        Continue with {Object.values(equipment).filter(Boolean).length} appliance{Object.values(equipment).filter(Boolean).length !== 1 ? "s" : ""}
+        <ChevronRight size={18} />
+      </Button>
     </div>
   );
 }
 
-// ─── Recipe Card ───────────────────────────────────────────────────────────────
+// ─── STEP 2: Pantry (Ingredients I Have) ─────────────────────────────────────
 
-function RecipeCard({
-  recipe, selected, onToggle, servingMultiplier, isLast,
+// Flat list of common ingredients to search through
+const ALL_INGREDIENTS = [
+  "chicken breast","chicken thighs","ground beef","ground turkey","salmon","shrimp","pork chops",
+  "bacon","sausage","eggs","butter","olive oil","vegetable oil","milk","heavy cream","sour cream",
+  "cheddar cheese","parmesan","mozzarella","cream cheese","garlic","onion","red onion","green onion",
+  "tomatoes","bell pepper","zucchini","mushrooms","spinach","broccoli","carrots","celery","potatoes",
+  "sweet potato","corn","peas","green beans","asparagus","lemon","lime","ginger","jalapeño",
+  "flour","sugar","brown sugar","baking soda","baking powder","salt","black pepper","cumin","paprika",
+  "chili powder","cayenne","oregano","thyme","rosemary","basil","bay leaves","cinnamon","turmeric",
+  "soy sauce","Worcestershire sauce","hot sauce","honey","maple syrup","vinegar","tomato paste",
+  "chicken broth","beef broth","vegetable broth","coconut milk","canned tomatoes","kidney beans",
+  "black beans","rice","pasta","bread crumbs","tortillas","panko","arborio rice","lentils",
+];
+
+function StepPantry({
+  pantry, onPantryChange, onNext, onBack,
 }: {
-  recipe: Recipe; selected: boolean; onToggle: () => void; servingMultiplier: number; isLast: boolean;
+  pantry: string[];
+  onPantryChange: (items: string[]) => void;
+  onNext: () => void;
+  onBack: () => void;
 }) {
-  return (
-    <>
-      <AccordionItem
-        value={String(recipe.id)}
-        className={`border rounded-xl overflow-hidden transition-all duration-200 ${selected ? "border-primary shadow-md" : "border-border"}`}
-        data-testid={`recipe-card-${recipe.id}`}
-      >
-        <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-accent/40 transition-colors">
-          <div className="flex items-center gap-3 w-full text-left">
-            {recipe.imageUrl && (
-              <img src={recipe.imageUrl} alt={recipe.name} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="font-display font-bold text-sm">{recipe.name}</span>
-                {recipe.equipment.map(eq => (
-                  <span key={eq} className="text-xs">{EQUIPMENT_ICONS[eq]}</span>
-                ))}
-              </div>
-              <div className="flex items-center gap-3 mt-0.5">
-                <span className="text-xs text-muted-foreground flex items-center gap-1"><Clock size={11} /> {recipe.cookTimeMinutes} min</span>
-                <span className="text-xs text-muted-foreground flex items-center gap-1"><Users size={11} /> {Math.round(recipe.servings * servingMultiplier)} servings</span>
-              </div>
-            </div>
-            <Button
-              size="sm"
-              variant={selected ? "default" : "outline"}
-              className={`flex-shrink-0 text-xs h-7 px-3 ${selected ? "bg-primary text-primary-foreground" : ""}`}
-              onClick={(e) => { e.stopPropagation(); onToggle(); }}
-              data-testid={`select-recipe-${recipe.id}`}
-            >
-              {selected ? "✓ Added" : "Select"}
-            </Button>
-          </div>
-        </AccordionTrigger>
-        <AccordionContent className="px-4 pb-4">
-          <p className="text-sm text-muted-foreground mb-3">{recipe.description}</p>
+  const [query, setQuery] = useState("");
+  const suggestions = useMemo(() => {
+    if (query.length < 2) return [];
+    const q = query.toLowerCase();
+    return ALL_INGREDIENTS.filter(i => i.includes(q) && !pantry.includes(i)).slice(0, 8);
+  }, [query, pantry]);
 
-          {/* Contributor */}
-          {recipe.contributor && (
-            <div className="flex items-center gap-2 mb-3 pb-3 border-b border-border">
-              <Avatar className="w-7 h-7">
-                <AvatarImage src={recipe.contributor.photoUrl} alt={recipe.contributor.name} />
-                <AvatarFallback className="text-xs">{recipe.contributor.name[0]}</AvatarFallback>
-              </Avatar>
-              <div>
-                <p className="text-xs font-medium">{recipe.contributor.name}</p>
-                <p className="text-xs text-muted-foreground capitalize">{recipe.contributor.role}</p>
+  const toggle = (item: string) => {
+    onPantryChange(
+      pantry.includes(item) ? pantry.filter(p => p !== item) : [...pantry, item]
+    );
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-6">
+      <div className="text-center mb-6">
+        <h2 className="text-2xl font-display font-bold mb-1">What's in your pantry?</h2>
+        <p className="text-muted-foreground text-sm">Tell us what you already have. We'll score each recipe and remove owned items from your shopping list.</p>
+      </div>
+
+      {/* Search box */}
+      <div className="relative mb-4">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Search ingredients (e.g. chicken, garlic, butter…)"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          className="pl-9"
+          data-testid="pantry-search"
+        />
+        {/* Dropdown suggestions */}
+        {suggestions.length > 0 && (
+          <div className="absolute z-20 top-full left-0 right-0 mt-1 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
+            {suggestions.map(s => (
+              <button
+                key={s}
+                className="w-full text-left px-4 py-2.5 text-sm hover:bg-accent transition-colors capitalize"
+                onClick={() => { toggle(s); setQuery(""); }}
+              >
+                + {s}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Selected pantry items */}
+      {pantry.length > 0 && (
+        <div className="mb-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+            Your pantry ({pantry.length} items)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {pantry.map(item => (
+              <button
+                key={item}
+                onClick={() => toggle(item)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary text-xs font-medium hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors"
+                data-testid={`pantry-item-${item}`}
+              >
+                <CheckCircle2 size={11} />
+                <span className="capitalize">{item}</span>
+                <X size={11} className="ml-0.5" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Common quick-adds */}
+      {pantry.length < 5 && (
+        <div className="mb-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Quick add commons</p>
+          <div className="flex flex-wrap gap-2">
+            {["eggs","butter","garlic","onion","olive oil","salt","black pepper","chicken broth","flour","sugar"].filter(i => !pantry.includes(i)).map(item => (
+              <button
+                key={item}
+                onClick={() => toggle(item)}
+                className="px-3 py-1.5 rounded-full border border-dashed border-border bg-card text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors capitalize"
+              >
+                + {item}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <Button variant="outline" onClick={onBack} className="gap-1"><ChevronLeft size={16} /> Back</Button>
+        <Button size="lg" className="flex-1 gap-2 bg-primary text-primary-foreground font-bold" onClick={onNext} data-testid="btn-pantry-next">
+          {pantry.length === 0 ? "Skip — I'll buy everything" : `Continue with ${pantry.length} pantry items`}
+          <ChevronRight size={18} />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── STEP 3: Recipe Selection ─────────────────────────────────────────────────
+
+function MatchBar({ pct }: { pct: number }) {
+  const color = pct >= 75 ? "bg-green-500" : pct >= 40 ? "bg-amber-500" : "bg-rose-400";
+  return (
+    <div className="flex items-center gap-2 mt-1.5">
+      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className={`text-[11px] font-bold tabular-nums ${pct >= 75 ? "text-green-600 dark:text-green-400" : pct >= 40 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
+function StepRecipes({
+  recipes, equipment, pantry, selectedIds, servings,
+  onToggle, onServing, onNext, onBack, isLoading,
+  onShowAdd, contributors,
+}: {
+  recipes: Recipe[];
+  equipment: Record<EquipmentKey, boolean>;
+  pantry: string[];
+  selectedIds: number[];
+  servings: Record<number, number>;
+  onToggle: (id: number) => void;
+  onServing: (id: number, s: number) => void;
+  onNext: () => void;
+  onBack: () => void;
+  isLoading: boolean;
+  onShowAdd: () => void;
+  contributors: Contributor[];
+}) {
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "compatible" | "pantry">("compatible");
+
+  const compatible = useMemo(() =>
+    recipes.filter(r => r.equipment.length === 0 || r.equipment.every(eq => equipment[eq])),
+    [recipes, equipment]
+  );
+
+  const scored = useMemo(() =>
+    compatible.map(r => ({ ...r, match: pantryMatch(r, pantry) }))
+      .sort((a, b) => b.match - a.match),
+    [compatible, pantry]
+  );
+
+  const displayed = useMemo(() => {
+    let list = scored;
+    if (filter === "compatible") list = scored;
+    if (filter === "pantry") list = scored.filter(r => r.match > 0);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(r => r.name.toLowerCase().includes(q) || r.tags.some(t => t.toLowerCase().includes(q)));
+    }
+    return list;
+  }, [scored, filter, search]);
+
+  const canCook = selectedIds.length >= 2;
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-6">
+      <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
+        <div>
+          <h2 className="text-2xl font-display font-bold">Pick your recipes</h2>
+          <p className="text-muted-foreground text-sm mt-0.5">
+            {compatible.length} compatible · select 2–5 to parallel cook
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={onShowAdd} className="gap-1.5 text-xs shrink-0">
+          <Plus size={13} /> Add Recipe
+        </Button>
+      </div>
+
+      {/* Search + filter */}
+      <div className="flex gap-2 mb-4 flex-wrap">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search recipes…" className="pl-8 h-9 text-sm" />
+        </div>
+        <div className="flex gap-1">
+          {(["compatible","pantry","all"] as const).map(f => (
+            <button key={f} onClick={() => setFilter(f)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${filter === f ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+            >{f === "compatible" ? "✓ Compatible" : f === "pantry" ? "🥬 Pantry match" : "All"}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Selected strip */}
+      {selectedIds.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 p-3 rounded-xl bg-primary/5 border border-primary/20 flex-wrap">
+          <Zap size={14} className="text-primary shrink-0" />
+          <span className="text-xs font-medium text-primary">{selectedIds.length} selected</span>
+          {selectedIds.map((id, idx) => {
+            const r = recipes.find(r => r.id === id);
+            if (!r) return null;
+            const pal = RECIPE_PALETTE[idx % RECIPE_PALETTE.length];
+            return (
+              <span key={id} className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full ${pal.badge}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${pal.dot}`} />
+                {r.name}
+                <button onClick={() => onToggle(id)} className="ml-0.5 hover:opacity-70"><X size={10} /></button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Recipe grid */}
+      {isLoading ? (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="rounded-xl bg-muted animate-pulse h-64" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+          {displayed.map(recipe => {
+            const selIdx = selectedIds.indexOf(recipe.id);
+            const isSelected = selIdx !== -1;
+            const pal = isSelected ? RECIPE_PALETTE[selIdx % RECIPE_PALETTE.length] : null;
+            const isDisabled = !isSelected && selectedIds.length >= 5;
+            const sv = servings[recipe.id] ?? recipe.servings;
+
+            return (
+              <div
+                key={recipe.id}
+                className={[
+                  "rounded-xl border-2 overflow-hidden bg-card transition-all duration-150 flex flex-col",
+                  isDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md",
+                  isSelected ? `${pal!.border} shadow-sm ring-2 ${pal!.ring}` : "border-border",
+                ].join(" ")}
+                onClick={() => !isDisabled && onToggle(recipe.id)}
+                data-testid={`recipe-card-${recipe.id}`}
+              >
+                {/* Image */}
+                <div className="relative h-44 bg-muted overflow-hidden">
+                  {recipe.imageUrl ? (
+                    <img src={recipe.imageUrl} alt={recipe.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <UtensilsCrossed size={32} className="text-muted-foreground/30" />
+                    </div>
+                  )}
+                  {/* Selected overlay */}
+                  {isSelected && (
+                    <div className={`absolute inset-0 ${pal!.light} opacity-30`} />
+                  )}
+                  {/* Selected badge */}
+                  {isSelected && (
+                    <div className={`absolute top-2 right-2 w-7 h-7 rounded-full ${pal!.dot} flex items-center justify-center shadow-md`}>
+                      <CheckCircle2 size={14} className="text-white" />
+                    </div>
+                  )}
+                  {/* Contributor avatar */}
+                  {recipe.contributor && (
+                    <div className="absolute bottom-2 left-2 flex items-center gap-1.5 bg-black/50 backdrop-blur-sm rounded-full px-2 py-1">
+                      <img src={recipe.contributor.photoUrl} alt={recipe.contributor.name} className="w-4 h-4 rounded-full object-cover" />
+                      <span className="text-white text-[10px] font-medium">{recipe.contributor.name}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Content */}
+                <div className="p-3 flex flex-col flex-1">
+                  <h3 className="font-display font-bold text-sm leading-tight mb-1">{recipe.name}</h3>
+
+                  {/* Pantry match */}
+                  <MatchBar pct={recipe.match} />
+
+                  <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground flex-wrap">
+                    <span className="flex items-center gap-1"><Clock size={11} />{fmtMins(recipe.cookTimeMinutes)}</span>
+                    <span>·</span>
+                    <span>{recipe.equipment.map(e => EQUIPMENT_INFO[e]?.icon ?? e).join(" ")}</span>
+                    {recipe.tags.slice(0, 2).map(t => (
+                      <span key={t} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">{t}</span>
+                    ))}
+                  </div>
+
+                  {/* Per-recipe servings — only when selected */}
+                  {isSelected && (
+                    <div
+                      className="mt-3 pt-3 border-t border-border flex items-center justify-between"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <span className="text-xs font-medium text-muted-foreground flex items-center gap-1"><Users size={11} /> Servings</span>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => onServing(recipe.id, Math.max(1, sv - 1))} className="w-6 h-6 rounded-full border border-border flex items-center justify-center hover:bg-accent"><Minus size={10} /></button>
+                        <span className="text-sm font-bold w-5 text-center">{sv}</span>
+                        <button onClick={() => onServing(recipe.id, Math.min(20, sv + 1))} className="w-6 h-6 rounded-full border border-border flex items-center justify-center hover:bg-accent"><Plus size={10} /></button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-              {recipe.sourceUrl && (
-                <a href={recipe.sourceUrl} target="_blank" rel="noopener noreferrer" className="ml-auto text-muted-foreground hover:text-primary transition-colors">
-                  <LinkIcon size={13} />
-                </a>
-              )}
+            );
+          })}
+
+          {displayed.length === 0 && (
+            <div className="col-span-3 text-center py-16 text-muted-foreground">
+              <UtensilsCrossed size={32} className="mx-auto mb-3 opacity-30" />
+              <p className="text-sm">No matching recipes. Try changing your filters.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex gap-3 sticky bottom-4">
+        <Button variant="outline" onClick={onBack} className="gap-1 shrink-0"><ChevronLeft size={16} /> Back</Button>
+        <Button
+          size="lg"
+          className="flex-1 gap-2 bg-primary text-primary-foreground font-bold"
+          disabled={!canCook}
+          onClick={onNext}
+          data-testid="btn-recipes-next"
+        >
+          <Zap size={16} />
+          {canCook
+            ? `Start Parallel Cook (${selectedIds.length} recipes)`
+            : `Select at least ${2 - selectedIds.length} more recipe${2 - selectedIds.length !== 1 ? "s" : ""}`}
+          <ChevronRight size={18} />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── STEP 4: Parallel Cook ─────────────────────────────────────────────────────
+
+type CookPhase = "gameplan" | "execution" | "done";
+
+function StepCook({
+  plan, totalMinutes, selectedRecipes, pantry, servings,
+  onFinish, onBack,
+}: {
+  plan: MasterTask[];
+  totalMinutes: number;
+  selectedRecipes: Recipe[];
+  pantry: string[];
+  servings: Record<number, number>;
+  onFinish: () => void;
+  onBack: () => void;
+}) {
+  const [phase, setPhase] = useState<CookPhase>("gameplan");
+  const [stepIdx, setStepIdx] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const [running, setRunning] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const recipeColorMap = useMemo(() => {
+    const m: Record<number, typeof RECIPE_PALETTE[0]> = {};
+    selectedRecipes.forEach((r, i) => { m[r.id] = RECIPE_PALETTE[i % RECIPE_PALETTE.length]; });
+    return m;
+  }, [selectedRecipes]);
+
+  // Start timer when execution begins
+  useEffect(() => {
+    if (phase === "execution" && running) {
+      timerRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [phase, running]);
+
+  const startCooking = () => {
+    setPhase("execution");
+    setStepIdx(0);
+    setElapsed(0);
+    setRunning(true);
+  };
+
+  const sequentialTotal = selectedRecipes.reduce((s, r) => s + r.cookTimeMinutes, 0);
+  const timeSaved = Math.max(0, sequentialTotal - totalMinutes);
+
+  // ── Game Plan view ──
+  if (phase === "gameplan") {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-6">
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={onBack} className="p-2 rounded-lg hover:bg-accent text-muted-foreground"><ChevronLeft size={18} /></button>
+          <div>
+            <h2 className="text-xl font-display font-bold">Your Game Plan</h2>
+            <p className="text-xs text-muted-foreground">Review before you start cooking</p>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="rounded-xl bg-card border border-border p-3 text-center">
+            <div className="text-xl font-bold font-display">{selectedRecipes.length}</div>
+            <div className="text-xs text-muted-foreground">Recipes</div>
+          </div>
+          <div className="rounded-xl bg-card border border-border p-3 text-center">
+            <div className="text-xl font-bold font-display">{fmtMins(totalMinutes)}</div>
+            <div className="text-xs text-muted-foreground">Total time</div>
+          </div>
+          <div className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-3 text-center">
+            <div className="text-xl font-bold font-display text-emerald-600 dark:text-emerald-400">
+              {timeSaved > 0 ? `-${fmtMins(timeSaved)}` : "Optimized"}
+            </div>
+            <div className="text-xs text-emerald-600/70 dark:text-emerald-400/70">vs sequential</div>
+          </div>
+        </div>
+
+        {/* Recipe legend */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {selectedRecipes.map((r, i) => {
+            const pal = RECIPE_PALETTE[i % RECIPE_PALETTE.length];
+            return (
+              <span key={r.id} className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border ${pal.badge} ${pal.border}`}>
+                <span className={`w-2 h-2 rounded-full ${pal.dot}`} />{r.name}
+                {servings[r.id] && servings[r.id] !== r.servings && (
+                  <span className="opacity-60">×{servings[r.id]}</span>
+                )}
+              </span>
+            );
+          })}
+        </div>
+
+        {/* Task list */}
+        <div className="space-y-2 mb-6">
+          {plan.map((task, i) => {
+            const pal = task.type === "consolidated" ? null : recipeColorMap[task.recipeId];
+            const cfg = STEP_TYPE[task.type];
+            return (
+              <div key={i} className={[
+                "flex gap-3 rounded-xl border p-3 transition-colors",
+                task.type === "consolidated"
+                  ? "bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800"
+                  : `${pal?.light ?? "bg-card"} ${pal?.border ?? "border-border"}`,
+              ].join(" ")} data-testid={`plan-task-${i}`}>
+                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-background border border-border flex items-center justify-center text-xs font-bold text-muted-foreground mt-0.5">{i + 1}</div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2 flex-wrap">
+                    <p className="text-sm font-medium leading-snug">{task.instruction}</p>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${cfg.cls}`}>{cfg.icon} {cfg.label}</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">{fmtMins(task.durationMinutes)}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    {task.type !== "consolidated" && <span className={`text-[10px] font-semibold ${pal?.text ?? ""}`}>{task.recipeName}</span>}
+                    {task.equipment && <span className="text-[10px] text-muted-foreground">· {task.equipment}</span>}
+                    <span className="text-[10px] text-muted-foreground ml-auto">@{task.startMinute}m</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <Button size="lg" onClick={startCooking} className="w-full gap-3 bg-primary text-primary-foreground font-bold py-6 rounded-2xl text-base" data-testid="btn-start-cooking">
+          <Play size={20} /> Start Cooking — {plan.length} Steps
+        </Button>
+      </div>
+    );
+  }
+
+  // ── Execution view ──
+  if (phase === "execution") {
+    const current = plan[stepIdx];
+    const next = plan[stepIdx + 1] ?? null;
+    const isLast = stepIdx === plan.length - 1;
+    const progress = Math.round((stepIdx / plan.length) * 100);
+    const pal = current.type === "consolidated" ? RECIPE_PALETTE[0] : recipeColorMap[current.recipeId] ?? RECIPE_PALETTE[0];
+    const cfg = STEP_TYPE[current.type];
+
+    // Per-step estimated duration countdown
+    const stepSeconds = current.durationMinutes * 60;
+
+    return (
+      <div className="min-h-[calc(100vh-120px)] flex flex-col" data-testid="execution-mode">
+        {/* Progress bar */}
+        <div className="h-1 bg-muted"><div className="h-full bg-primary transition-all duration-500" style={{ width: `${progress}%` }} /></div>
+
+        {/* Timer bar */}
+        <div className="flex items-center justify-between px-4 py-2 bg-muted/40 border-b border-border">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Timer size={13} />
+            <span className="font-mono font-semibold">{fmtElapsed(elapsed)}</span>
+            <span>elapsed</span>
+          </div>
+          <span className="text-xs text-muted-foreground font-mono">Step {stepIdx + 1} / {plan.length}</span>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span>target</span>
+            <span className="font-mono font-semibold">{fmtMins(totalMinutes)}</span>
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col justify-center px-4 py-6 max-w-2xl mx-auto w-full">
+          {/* Type badge + recipe */}
+          <div className="flex items-center justify-center gap-2 mb-5 flex-wrap">
+            <span className={`text-sm font-semibold px-3 py-1 rounded-full ${cfg.cls}`}>{cfg.icon} {cfg.label}</span>
+            {current.type !== "consolidated" && (
+              <span className={`text-sm font-semibold ${pal.text}`}>{current.recipeName}</span>
+            )}
+          </div>
+
+          {/* ACTIVE STEP */}
+          <div className={`rounded-3xl border-2 ${pal.border} ${pal.light} p-8 mb-5 text-center`} data-testid="active-step">
+            <div className={`flex items-center justify-center gap-1.5 text-sm font-medium mb-4 ${pal.text}`}>
+              <Clock size={14} />
+              <span>{fmtMins(current.durationMinutes)}</span>
+              {current.equipment && <><span className="opacity-50">·</span><span>{current.equipment}</span></>}
+            </div>
+            <p className="text-2xl sm:text-3xl font-display font-semibold leading-snug" data-testid="step-instruction">
+              {current.instruction}
+            </p>
+          </div>
+
+          {/* NEXT UP */}
+          {next && (
+            <div className="rounded-2xl border border-dashed border-border bg-muted/30 px-5 py-4 mb-6" data-testid="next-step-preview">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/50 mb-1.5">Next up</p>
+              <p className="text-sm text-muted-foreground leading-relaxed">{next.instruction}</p>
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md ${STEP_TYPE[next.type].cls}`}>
+                  {STEP_TYPE[next.type].icon} {next.recipeName !== "All Recipes" ? next.recipeName : "Shared"}
+                </span>
+                <span className="text-[10px] text-muted-foreground">{fmtMins(next.durationMinutes)}</span>
+              </div>
             </div>
           )}
 
-          {/* Ingredients with affiliate links */}
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Ingredients</h4>
-          <ul className="text-sm space-y-1.5 mb-4">
-            {recipe.ingredients.map((ing, i) => (
-              <li key={i} className="flex items-center justify-between gap-2 group">
-                <div className="flex items-baseline gap-2 min-w-0">
-                  <span className="text-primary font-medium shrink-0">
-                    {ing.qty > 0
-                      ? `${+(ing.qty * servingMultiplier).toFixed(1)} ${ing.unit}`.trim()
-                      : ing.unit || ""}
-                  </span>
-                  <span className="text-foreground truncate">{ing.name}</span>
-                </div>
-                {/* Amazon affiliate link */}
-                <a
-                  href={getAmazonSearchUrl(ing.name)}
-                  target="_blank"
-                  rel="noopener noreferrer sponsored"
-                  className="opacity-0 group-hover:opacity-100 flex-shrink-0 flex items-center gap-1 text-xs text-amber-600 hover:text-amber-700 transition-all"
-                  title={`Shop ${ing.name} on Amazon`}
-                  aria-label={`Buy ${ing.name} on Amazon`}
-                >
-                  <ShoppingCart size={11} />
-                  <span className="hidden sm:inline">Amazon</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-
-          {/* Affiliate banner */}
-          <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 mb-3 text-xs text-amber-700 dark:text-amber-400">
-            <ShoppingCart size={12} className="flex-shrink-0" />
-            <span>Hover ingredients to shop on Amazon. As an affiliate, we earn from qualifying purchases.</span>
-          </div>
-
-          {/* Steps */}
-          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Steps</h4>
-          <ol className="text-sm space-y-1.5">
-            {recipe.steps.map((step, i) => (
-              <li key={i} className="flex gap-2.5">
-                <span className="text-primary font-bold min-w-[1.25rem] text-xs mt-0.5 shrink-0">{i + 1}.</span>
-                <span className="text-muted-foreground leading-relaxed">{step}</span>
-              </li>
-            ))}
-          </ol>
-
-          {/* Equipment / tag badges */}
-          <div className="flex flex-wrap gap-1.5 mt-3">
-            {recipe.equipment.map(eq => (
-              <Badge key={eq} variant="secondary" className="text-xs">{EQUIPMENT_ICONS[eq as keyof typeof EQUIPMENT_ICONS] ?? ""} {EQUIPMENT_LABELS[eq as keyof typeof EQUIPMENT_LABELS] ?? eq}</Badge>
-            ))}
-            {recipe.tags.filter(tag => !recipe.equipment.includes(tag)).map(tag => (
-              <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>
+          {/* Dot indicators */}
+          <div className="flex items-center justify-center gap-1 mb-6 flex-wrap">
+            {plan.map((_, i) => (
+              <div key={i} className={`rounded-full transition-all ${i < stepIdx ? "w-2 h-2 bg-primary/40" : i === stepIdx ? "w-3 h-3 bg-primary" : "w-2 h-2 bg-muted-foreground/20"}`} />
             ))}
           </div>
-        </AccordionContent>
-      </AccordionItem>
 
-      {/* Ad slot injected after every 3rd recipe */}
-      {isLast && (
-        <AdSlot slot="1234567890" className="my-2" label="Recipe list advertisement" />
-      )}
-    </>
+          {/* Button */}
+          {isLast ? (
+            <Button size="lg" onClick={() => { setRunning(false); setPhase("done"); }}
+              className="w-full gap-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-6 rounded-2xl text-base" data-testid="btn-finish">
+              <CheckCircle2 size={22} /> Done — Let's eat!
+            </Button>
+          ) : (
+            <Button size="lg" onClick={() => setStepIdx(i => i + 1)}
+              className="w-full gap-3 bg-primary text-primary-foreground font-bold py-6 rounded-2xl text-base" data-testid="btn-next-step">
+              Next Step <ChevronRight size={22} />
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Done ──
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[400px] text-center px-6 py-12">
+      <div className="text-6xl mb-4">🍽️</div>
+      <h2 className="text-3xl font-display font-bold mb-2">Meal prep complete!</h2>
+      <p className="text-muted-foreground mb-1">You cooked {selectedRecipes.length} recipes in <strong>{fmtElapsed(elapsed)}</strong></p>
+      <p className="text-sm text-muted-foreground mb-6">Target was {fmtMins(totalMinutes)}</p>
+      <div className="flex flex-wrap gap-2 justify-center mb-8">
+        {selectedRecipes.map(r => <Badge key={r.id} variant="secondary" className="text-sm px-3 py-1">✓ {r.name}</Badge>)}
+      </div>
+      <Button size="lg" onClick={onFinish} className="gap-2 bg-primary text-primary-foreground"><ShoppingBag size={18} /> View Shopping List</Button>
+    </div>
   );
 }
 
-// ─── Add Recipe Modal ──────────────────────────────────────────────────────────
+// ─── STEP 5: Shopping List ────────────────────────────────────────────────────
+
+function StepShopping({
+  selectedRecipes, pantry, servings, onBack, onReset,
+}: {
+  selectedRecipes: Recipe[];
+  pantry: string[];
+  servings: Record<number, number>;
+  onBack: () => void;
+  onReset: () => void;
+}) {
+  const lowerPantry = pantry.map(p => p.toLowerCase());
+
+  const allItems = selectedRecipes.flatMap(r => {
+    const multiplier = (servings[r.id] ?? r.servings) / (r.servings || 1);
+    return r.ingredients.map(ing => {
+      const owned = lowerPantry.some(p => ing.name.toLowerCase().includes(p) || p.includes(ing.name.toLowerCase().split(" ")[0]));
+      const qty = multiplier !== 1 && ing.qty > 0 ? +(ing.qty * multiplier).toFixed(1) : ing.qty;
+      return { ...ing, qty, recipeName: r.name, owned };
+    });
+  });
+
+  const toBuy = allItems.filter(i => !i.owned);
+  const have = allItems.filter(i => i.owned);
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-6">
+      <div className="flex items-center gap-3 mb-5">
+        <button onClick={onBack} className="p-2 rounded-lg hover:bg-accent text-muted-foreground"><ChevronLeft size={18} /></button>
+        <div>
+          <h2 className="text-xl font-display font-bold">Shopping List</h2>
+          <p className="text-xs text-muted-foreground">{toBuy.length} to buy · {have.length} already in pantry</p>
+        </div>
+      </div>
+
+      {/* Buy section */}
+      {toBuy.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <ShoppingCart size={15} className="text-primary" />
+            <h3 className="font-semibold text-sm">Need to buy ({toBuy.length})</h3>
+          </div>
+          <div className="rounded-xl border border-border overflow-hidden bg-card divide-y divide-border">
+            {toBuy.map((ing, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-3 hover:bg-accent/30 transition-colors">
+                <div>
+                  <span className="text-sm font-medium">{ing.qty > 0 ? `${ing.qty} ${ing.unit} ` : ""}{ing.name}</span>
+                  <span className="text-xs text-muted-foreground ml-2">({ing.recipeName})</span>
+                </div>
+                <a
+                  href={getAmazonUrl(ing.name)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[11px] text-primary hover:underline font-medium shrink-0 ml-3"
+                >
+                  <ShoppingCart size={11} /> Buy <ExternalLink size={9} />
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Already have section */}
+      {have.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Package size={15} className="text-muted-foreground" />
+            <h3 className="font-semibold text-sm text-muted-foreground">Already in your pantry ({have.length})</h3>
+          </div>
+          <div className="rounded-xl border border-border overflow-hidden bg-muted/30 divide-y divide-border">
+            {have.map((ing, i) => (
+              <div key={i} className="flex items-center justify-between px-4 py-2.5 opacity-50">
+                <span className="text-sm line-through">{ing.qty > 0 ? `${ing.qty} ${ing.unit} ` : ""}{ing.name}</span>
+                <span className="text-xs text-muted-foreground">({ing.recipeName})</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <Button size="lg" onClick={onReset} className="w-full gap-2 bg-primary text-primary-foreground font-bold">
+        <ChefHat size={18} /> Cook Another Batch
+      </Button>
+    </div>
+  );
+}
+
+// ─── Add Recipe Modal (kept from before) ──────────────────────────────────────
 
 function AddRecipeModal({ open, onClose, contributors }: { open: boolean; onClose: () => void; contributors: Contributor[] }) {
   const { toast } = useToast();
@@ -386,7 +959,7 @@ function AddRecipeModal({ open, onClose, contributors }: { open: boolean; onClos
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 block">Cook Time (min)</Label>
-              <Input type="number" min={5} max={300} value={form.cookTimeMinutes} onChange={e => setForm(f => ({ ...f, cookTimeMinutes: parseInt(e.target.value) || 30 }))} data-testid="input-cook-time" />
+              <Input type="number" min={5} max={300} value={form.cookTimeMinutes} onChange={e => setForm(f => ({ ...f, cookTimeMinutes: parseInt(e.target.value) || 30 }))} />
             </div>
             <div>
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 block">Servings</Label>
@@ -396,25 +969,25 @@ function AddRecipeModal({ open, onClose, contributors }: { open: boolean; onClos
           <div>
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 block">Equipment Needed *</Label>
             <div className="grid grid-cols-2 gap-2">
-              {(Object.keys(EQUIPMENT_LABELS) as EquipmentKey[]).map(eq => (
+              {(Object.entries(EQUIPMENT_INFO) as [EquipmentKey, typeof EQUIPMENT_INFO[EquipmentKey]][]).map(([eq, info]) => (
                 <label key={eq} className="flex items-center gap-2 cursor-pointer hover:bg-accent p-2 rounded-lg transition-colors">
-                  <Checkbox checked={form.equipment.includes(eq)} onCheckedChange={() => toggleEquip(eq)} />
-                  <span className="text-sm">{EQUIPMENT_ICONS[eq]} {EQUIPMENT_LABELS[eq]}</span>
+                  <input type="checkbox" checked={form.equipment.includes(eq)} onChange={() => toggleEquip(eq)} className="accent-primary" />
+                  <span className="text-sm">{info.icon} {info.label}</span>
                 </label>
               ))}
             </div>
           </div>
           <div>
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 block">Ingredients <span className="normal-case font-normal">(one per line: qty unit name)</span></Label>
-            <Textarea value={form.ingredients} onChange={e => setForm(f => ({ ...f, ingredients: e.target.value }))} placeholder={"2 tbsp olive oil\n1 lemon\n4 salmon fillets"} rows={5} className="font-mono text-xs" data-testid="input-ingredients" />
+            <Textarea value={form.ingredients} onChange={e => setForm(f => ({ ...f, ingredients: e.target.value }))} placeholder={"2 tbsp olive oil\n1 lemon\n4 salmon fillets"} rows={5} className="font-mono text-xs" />
           </div>
           <div>
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 block">Steps <span className="normal-case font-normal">(one per line)</span></Label>
-            <Textarea value={form.steps} onChange={e => setForm(f => ({ ...f, steps: e.target.value }))} placeholder={"Preheat oven to 400°F.\nSeason salmon.\nBake 12–15 minutes."} rows={5} data-testid="input-steps" />
+            <Textarea value={form.steps} onChange={e => setForm(f => ({ ...f, steps: e.target.value }))} placeholder={"Preheat oven to 400°F.\nSeason salmon.\nBake 12–15 minutes."} rows={5} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 block">Tags <span className="normal-case font-normal">(comma-sep)</span></Label>
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 block">Tags</Label>
               <Input value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} placeholder="healthy, quick" />
             </div>
             <div>
@@ -423,13 +996,9 @@ function AddRecipeModal({ open, onClose, contributors }: { open: boolean; onClos
             </div>
           </div>
           <div>
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 block">Source Link</Label>
-            <Input value={form.sourceUrl} onChange={e => setForm(f => ({ ...f, sourceUrl: e.target.value }))} placeholder="https://recipe-site.com/..." />
-          </div>
-          <div>
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 block">Added By</Label>
             <Select value={form.contributorId} onValueChange={v => setForm(f => ({ ...f, contributorId: v }))}>
-              <SelectTrigger data-testid="select-contributor"><SelectValue placeholder="Select contributor…" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Select contributor…" /></SelectTrigger>
               <SelectContent>
                 {contributors.map(c => (
                   <SelectItem key={c.id} value={String(c.id)}>
@@ -451,7 +1020,7 @@ function AddRecipeModal({ open, onClose, contributors }: { open: boolean; onClos
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => mutation.mutate(form)} disabled={!form.name || form.equipment.length === 0 || mutation.isPending} className="bg-primary text-primary-foreground" data-testid="button-submit-recipe">
+          <Button onClick={() => mutation.mutate(form)} disabled={!form.name || form.equipment.length === 0 || mutation.isPending} className="bg-primary text-primary-foreground">
             {mutation.isPending ? "Adding…" : "Add Recipe"}
           </Button>
         </DialogFooter>
@@ -460,339 +1029,141 @@ function AddRecipeModal({ open, onClose, contributors }: { open: boolean; onClos
   );
 }
 
-// ─── Sidebar Content (shared between desktop and mobile sheet) ────────────────
+// ─── Main App ──────────────────────────────────────────────────────────────────
 
-function SidebarContent({
-  equipmentOn, toggleEquipment, burners, setBurners,
-  maxMinutes, setMaxMinutes, startTime, setStartTime,
-  servingMultiplier, setServingMultiplier, selectedCount,
-}: {
-  equipmentOn: Record<EquipmentKey, boolean>;
-  toggleEquipment: (k: EquipmentKey) => void;
-  burners: number; setBurners: (n: number) => void;
-  maxMinutes: number; setMaxMinutes: (n: number) => void;
-  startTime: string; setStartTime: (s: string) => void;
-  servingMultiplier: number; setServingMultiplier: (n: number) => void;
-  selectedCount: number;
-}) {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-        {/* Equipment */}
-        <section>
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Kitchen Equipment</h2>
-          <div className="space-y-2">
-            {(Object.entries(EQUIPMENT_LABELS) as [EquipmentKey, string][]).map(([key, label]) => (
-              <label key={key} className="flex items-center gap-2.5 cursor-pointer" data-testid={`equipment-${key}`}>
-                <Checkbox checked={equipmentOn[key]} onCheckedChange={() => toggleEquipment(key)} className="data-[state=checked]:bg-primary data-[state=checked]:border-primary" />
-                <span className="text-sm">{EQUIPMENT_ICONS[key]} {label}</span>
-              </label>
-            ))}
-          </div>
-          {equipmentOn.stove && (
-            <div className="mt-3 flex items-center gap-3">
-              <Label className="text-xs text-muted-foreground whitespace-nowrap">Burners:</Label>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setBurners(Math.max(1, burners - 1))} disabled={burners <= 1} className="w-6 h-6 rounded border border-border flex items-center justify-center text-sm hover:bg-accent transition-colors disabled:opacity-40" data-testid="button-burners-minus">−</button>
-                <span className="text-sm font-semibold w-4 text-center">{burners}</span>
-                <button onClick={() => setBurners(Math.min(6, burners + 1))} disabled={burners >= 6} className="w-6 h-6 rounded border border-border flex items-center justify-center text-sm hover:bg-accent transition-colors disabled:opacity-40" data-testid="button-burners-plus">+</button>
-              </div>
-            </div>
-          )}
-        </section>
-
-        {/* Ad slot in sidebar */}
-        <AdSlot slot="9876543210" label="Sidebar advertisement" />
-
-        {/* Timing */}
-        <section>
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Timing</h2>
-          <div className="space-y-3">
-            <div>
-              <div className="flex justify-between mb-2">
-                <span className="text-sm">Max cook time</span>
-                <span className="text-sm font-semibold text-primary">{maxMinutes} min</span>
-              </div>
-              <Slider min={30} max={240} step={15} value={[maxMinutes]} onValueChange={([v]) => setMaxMinutes(v)} className="[&_[role=slider]]:bg-primary [&_[role=slider]]:border-primary" data-testid="slider-max-time" />
-              <div className="flex justify-between mt-1">
-                <span className="text-xs text-muted-foreground">30m</span>
-                <span className="text-xs text-muted-foreground">4h</span>
-              </div>
-            </div>
-            <div>
-              <Label className="text-sm mb-1.5 block">Start cooking at</Label>
-              <Select value={startTime} onValueChange={setStartTime}>
-                <SelectTrigger className="h-8 text-sm" data-testid="select-start-time"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {TIME_OPTIONS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </section>
-
-        {/* Serving Size */}
-        <section>
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Serving Size</h2>
-          <Select value={String(servingMultiplier)} onValueChange={v => setServingMultiplier(parseFloat(v))}>
-            <SelectTrigger className="h-8 text-sm" data-testid="select-servings"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {SERVING_MULTIPLIERS.map(m => <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </section>
-      </div>
-
-      <div className="px-5 py-3 border-t border-border text-xs text-muted-foreground text-center">
-        {selectedCount === 0 ? "No recipes selected" : `${selectedCount} recipe${selectedCount > 1 ? "s" : ""} selected`}
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Page ─────────────────────────────────────────────────────────────────
+type AppStep = 1 | 2 | 3 | 4 | 5;
 
 export default function HomePage() {
   const { toast } = useToast();
-  const [, navigate] = useLocation();
   const [darkMode, setDarkMode] = useState(window.matchMedia("(prefers-color-scheme: dark)").matches);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  useEffect(() => { document.documentElement.classList.toggle("dark", darkMode); }, [darkMode]);
 
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", darkMode);
-  }, [darkMode]);
-
-  const [equipmentOn, setEquipmentOn] = useState<Record<EquipmentKey, boolean>>({
+  // Wizard state
+  const [step, setStep] = useState<AppStep>(1);
+  const [equipment, setEquipment] = useState<Record<EquipmentKey, boolean>>({
     oven: true, stove: true, airFryer: false, counter: true, instantPot: false, microwave: false,
   });
-  const [burners, setBurners] = useState(2);
-  const [maxMinutes, setMaxMinutes] = useState(90);
-  const [startTime, setStartTime] = useState("17:00");
-  const [servingMultiplier, setServingMultiplier] = useState(1);
-  const [selectedRecipeIds, setSelectedRecipeIds] = useState<number[]>([]);
-  const [schedule, setSchedule] = useState<ScheduleEntry[]>([]);
+  const [pantry, setPantry] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [servings, setServings] = useState<Record<number, number>>({});
+  const [parallelPlan, setParallelPlan] = useState<ParallelPlan | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
 
-  const { data: recipes = [], isLoading: recipesLoading } = useQuery<Recipe[]>({ queryKey: ["/api/recipes"] });
+  const { data: recipes = [], isLoading } = useQuery<Recipe[]>({ queryKey: ["/api/recipes"] });
   const { data: contributors = [] } = useQuery<Contributor[]>({ queryKey: ["/api/contributors"] });
 
-  const compatibleRecipes = useMemo(() =>
-    recipes.filter(r => r.equipment.length === 0 || r.equipment.every(eq => equipmentOn[eq])),
-    [recipes, equipmentOn]
-  );
+  const selectedRecipes = recipes.filter(r => selectedIds.includes(r.id));
 
-  const generateSchedule = async () => {
-    if (selectedRecipeIds.length === 0) { toast({ title: "Select at least one recipe first" }); return; }
-    setIsGenerating(true);
-    try {
-      const res = await apiRequest("POST", "/api/schedule/generate", { selectedRecipeIds, startTime, maxMinutes, equipment: equipmentOn, burners });
-      const data = await res.json();
-      setSchedule(data.schedule);
-    } catch { toast({ title: "Failed to generate schedule", variant: "destructive" }); }
-    finally { setIsGenerating(false); }
+  const buildMutation = useMutation({
+    mutationFn: async (ids: number[]) => {
+      const res = await apiRequest("POST", "/api/schedule/parallel", { recipeIds: ids });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error ?? "Failed"); }
+      return res.json() as Promise<ParallelPlan>;
+    },
+    onSuccess: (data) => { setParallelPlan(data); setStep(4); },
+    onError: (e: Error) => toast({ title: e.message, variant: "destructive" }),
+  });
+
+  const toggleEquipment = (k: EquipmentKey) => {
+    setEquipment(prev => ({ ...prev, [k]: !prev[k] }));
+    setSelectedIds([]);
   };
 
   const toggleRecipe = (id: number) => {
-    setSelectedRecipeIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-    setSchedule([]);
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  const toggleEquipment = (key: EquipmentKey) => {
-    setEquipmentOn(prev => ({ ...prev, [key]: !prev[key] }));
-    setSelectedRecipeIds([]);
-    setSchedule([]);
-  };
-
-  const sidebarProps = {
-    equipmentOn, toggleEquipment, burners, setBurners,
-    maxMinutes, setMaxMinutes, startTime, setStartTime,
-    servingMultiplier, setServingMultiplier, selectedCount: selectedRecipeIds.length,
+  const handleReset = () => {
+    setStep(1);
+    setSelectedIds([]);
+    setParallelPlan(null);
+    setServings({});
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background" data-testid="homepage">
-
-      {/* ── Desktop Sidebar ── */}
-      <aside className="hidden md:flex w-72 flex-shrink-0 flex-col bg-sidebar border-r border-sidebar-border overflow-hidden">
-        {/* Sidebar header */}
-        <div className="px-5 py-4 border-b border-sidebar-border">
-          <div className="flex items-center gap-3">
-            <Logo size={32} />
-            <div>
-              <h1 className="font-display font-bold text-base leading-tight">Mean Cuisines</h1>
-              <p className="text-xs text-muted-foreground">Cook Like a Machine.</p>
+    <div className="min-h-screen bg-background" data-testid="homepage">
+      {/* ── Global nav ── */}
+      <header className="sticky top-0 z-30 bg-background/95 backdrop-blur border-b border-border">
+        <div className="max-w-5xl mx-auto px-4 flex items-center justify-between h-14 gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Logo mark */}
+            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
+              <ChefHat size={18} className="text-primary-foreground" />
             </div>
-            <button onClick={() => setDarkMode(d => !d)} className="ml-auto p-1.5 rounded-lg hover:bg-sidebar-accent transition-colors text-muted-foreground" aria-label="Toggle dark mode" data-testid="button-dark-mode">
+            <span className="font-display font-bold text-base hidden sm:block">Mean Cuisines</span>
+          </div>
+
+          {/* Step bar in header on md+ */}
+          <div className="flex-1 hidden md:block">
+            <StepBar step={step} total={5} />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button onClick={() => setDarkMode(d => !d)} className="p-2 rounded-lg hover:bg-accent transition-colors text-muted-foreground" aria-label="Toggle dark mode">
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
           </div>
         </div>
-        <SidebarContent {...sidebarProps} />
-      </aside>
 
-      {/* ── Main Content ── */}
-      <main className="flex-1 overflow-y-auto min-w-0">
-
-        {/* Top bar */}
-        <header className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border px-4 md:px-6 py-3 flex items-center gap-3">
-          {/* Mobile: hamburger + logo */}
-          <div className="flex items-center gap-2 md:hidden">
-            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-              <SheetTrigger asChild>
-                <button className="p-1.5 rounded-lg hover:bg-accent transition-colors" aria-label="Open menu" data-testid="button-mobile-menu">
-                  <Menu size={20} />
-                </button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-72 p-0 flex flex-col">
-                <div className="px-5 py-4 border-b border-border flex items-center gap-3">
-                  <Logo size={28} />
-                  <div>
-                    <h1 className="font-display font-bold text-sm">Mean Cuisines</h1>
-                    <p className="text-xs text-muted-foreground">Cook Like a Machine.</p>
-                  </div>
-                  <button onClick={() => setMobileMenuOpen(false)} className="ml-auto p-1 text-muted-foreground" aria-label="Close menu">
-                    <X size={16} />
-                  </button>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <SidebarContent {...sidebarProps} />
-                </div>
-              </SheetContent>
-            </Sheet>
-            <Logo size={24} />
-            <span className="font-display font-bold text-sm">Mean Cuisines</span>
-          </div>
-
-          <div className="hidden md:flex items-center gap-2">
-            <UtensilsCrossed size={18} className="text-primary" />
-            <h2 className="font-display font-bold text-base">
-              Compatible Recipes
-              <span className="ml-2 text-sm font-normal text-muted-foreground">({compatibleRecipes.length})</span>
-            </h2>
-          </div>
-
-          <div className="ml-auto flex items-center gap-2">
-            {/* Mobile dark mode */}
-            <button onClick={() => setDarkMode(d => !d)} className="md:hidden p-1.5 rounded-lg hover:bg-accent transition-colors text-muted-foreground" aria-label="Toggle dark mode">
-              {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
-            {/* Parallel Cooking entry point */}
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1.5 text-xs border-primary text-primary hover:bg-primary hover:text-primary-foreground"
-              onClick={() => navigate("/parallel")}
-              data-testid="button-parallel-cook"
-            >
-              <Zap size={13} />
-              <span className="hidden sm:inline">Parallel Cook</span>
-              <span className="sm:hidden">Cook</span>
-            </Button>
-            <Button size="sm" className="bg-primary text-primary-foreground gap-1.5 text-xs" onClick={() => setShowAddModal(true)} data-testid="button-add-recipe">
-              <Plus size={14} /> <span className="hidden sm:inline">Add Recipe</span><span className="sm:hidden">Add</span>
-            </Button>
-          </div>
-        </header>
-
-        {/* Mobile heading */}
-        <div className="md:hidden px-4 pt-4 pb-0 flex items-center gap-2">
-          <UtensilsCrossed size={15} className="text-primary" />
-          <h2 className="font-display font-bold text-sm">
-            Compatible Recipes <span className="text-muted-foreground font-normal">({compatibleRecipes.length})</span>
-          </h2>
+        {/* Mobile step bar */}
+        <div className="md:hidden border-t border-border">
+          <StepBar step={step} total={5} />
         </div>
+      </header>
 
-        {/* Top ad banner */}
-        <div className="px-4 md:px-6 pt-4">
-          <AdSlot slot="1111111111" className="w-full" label="Top banner advertisement" />
-        </div>
-
-        <div className="p-4 md:p-6 grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* Recipe List */}
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <Flame size={15} className="text-primary" />
-              <h3 className="font-display font-semibold text-sm">Recipes</h3>
-            </div>
-
-            {recipesLoading ? (
-              <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className="h-20 bg-accent animate-pulse rounded-xl" />)}</div>
-            ) : compatibleRecipes.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
-                <ChefHat size={40} className="mb-3 opacity-30" />
-                <p className="text-sm font-medium">No compatible recipes</p>
-                <p className="text-xs mt-1">Enable more equipment or add new recipes</p>
-              </div>
-            ) : (
-              <Accordion type="multiple" className="space-y-2">
-                {compatibleRecipes.map((recipe, idx) => (
-                  <RecipeCard
-                    key={recipe.id}
-                    recipe={recipe}
-                    selected={selectedRecipeIds.includes(recipe.id)}
-                    onToggle={() => toggleRecipe(recipe.id)}
-                    servingMultiplier={servingMultiplier}
-                    isLast={(idx + 1) % 3 === 0}
-                  />
-                ))}
-              </Accordion>
-            )}
-          </div>
-
-          {/* Schedule Panel */}
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <CalendarClock size={15} className="text-primary" />
-                <h3 className="font-display font-semibold text-sm">Cook Schedule</h3>
-              </div>
-              {selectedRecipeIds.length > 0 && (
-                <Button size="sm" variant="outline" className="text-xs h-7 gap-1 border-primary text-primary hover:bg-primary hover:text-primary-foreground" onClick={generateSchedule} disabled={isGenerating} data-testid="button-generate-schedule">
-                  {isGenerating ? "Generating…" : "Generate"}
-                </Button>
-              )}
-            </div>
-
-            {schedule.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border bg-card/50 p-8 text-center">
-                <CalendarClock size={36} className="mx-auto mb-3 text-muted-foreground/40" />
-                <p className="text-sm font-medium text-muted-foreground">No schedule yet</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {selectedRecipeIds.length === 0 ? "Select recipes to get started" : "Click Generate to plan your cook session"}
-                </p>
-                {selectedRecipeIds.length > 0 && (
-                  <Button size="sm" className="mt-4 bg-primary text-primary-foreground text-xs" onClick={generateSchedule} disabled={isGenerating} data-testid="button-generate-schedule-empty">
-                    {isGenerating ? "Generating…" : "Generate Schedule"}
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="bg-card border border-border rounded-xl p-4">
-                <ScheduleTimeline schedule={schedule} recipes={recipes} />
-              </div>
-            )}
-
-            <div className="flex gap-2 bg-accent/60 rounded-xl p-3 text-xs text-muted-foreground mt-3">
-              <Info size={13} className="flex-shrink-0 mt-0.5 text-primary" />
-              <p>Recipes are sorted longest-first so everything finishes together. Equipment conflicts are avoided automatically.</p>
-            </div>
-
-            {/* Schedule ad */}
-            <AdSlot slot="2222222222" className="mt-4" label="Schedule panel advertisement" />
-          </div>
-        </div>
-
-        {/* Footer */}
-        <footer className="border-t border-border px-4 md:px-6 py-5 mt-2">
-          <div className="text-center text-xs text-muted-foreground space-y-1">
-            <p className="font-display font-semibold text-sm text-foreground">Mean Cuisines</p>
-            <p>Cook Like a Machine. Eat Like a King.</p>
-            <p className="text-muted-foreground/60">
-              Amazon affiliate disclosure: we earn a small commission on qualifying purchases at no extra cost to you.
-            </p>
-          </div>
-        </footer>
+      {/* ── Step content ── */}
+      <main className="pb-16">
+        {step === 1 && (
+          <StepEquipment
+            equipment={equipment}
+            onToggle={toggleEquipment}
+            onNext={() => setStep(2)}
+          />
+        )}
+        {step === 2 && (
+          <StepPantry
+            pantry={pantry}
+            onPantryChange={setPantry}
+            onNext={() => setStep(3)}
+            onBack={() => setStep(1)}
+          />
+        )}
+        {step === 3 && (
+          <StepRecipes
+            recipes={recipes}
+            equipment={equipment}
+            pantry={pantry}
+            selectedIds={selectedIds}
+            servings={servings}
+            onToggle={toggleRecipe}
+            onServing={(id, s) => setServings(prev => ({ ...prev, [id]: s }))}
+            onNext={() => buildMutation.mutate(selectedIds)}
+            onBack={() => setStep(2)}
+            isLoading={isLoading || buildMutation.isPending}
+            onShowAdd={() => setShowAddModal(true)}
+            contributors={contributors}
+          />
+        )}
+        {step === 4 && parallelPlan && (
+          <StepCook
+            plan={parallelPlan.plan}
+            totalMinutes={parallelPlan.totalMinutes}
+            selectedRecipes={selectedRecipes}
+            pantry={pantry}
+            servings={servings}
+            onFinish={() => setStep(5)}
+            onBack={() => setStep(3)}
+          />
+        )}
+        {step === 5 && (
+          <StepShopping
+            selectedRecipes={selectedRecipes}
+            pantry={pantry}
+            servings={servings}
+            onBack={() => setStep(4)}
+            onReset={handleReset}
+          />
+        )}
       </main>
 
       <AddRecipeModal open={showAddModal} onClose={() => setShowAddModal(false)} contributors={contributors} />
