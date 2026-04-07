@@ -1,10 +1,16 @@
 /**
- * Parallel Process Cooking Engine
- * Treats the kitchen like a job-shop scheduler:
- *  - Long passive tasks (bake, simmer) start first
- *  - Active prep tasks for recipe B fill the idle time of recipe A
- *  - Redundant steps (e.g. "preheat oven") are consolidated
- *  - Equipment conflicts are detected and tasks are staggered
+ * Mean Cuisines — Phase-Based Parallel Cooking Engine
+ *
+ * Takes 2-5 recipes and produces a list of smart-named cooking PHASES.
+ * Each phase contains multiple steps from one or more recipes that should
+ * be executed simultaneously or in close sequence.
+ *
+ * Kitchen rules:
+ * - Mise en Place steps (pure prep: chop, measure, marinate) form Phase 1
+ * - Passive tasks (oven, simmer, boil) that block equipment are started early
+ * - Active stovetop steps can be parallelized if burner count allows
+ * - Steps that share equipment are staggered
+ * - Final phase: rest, plate, serve
  */
 
 export interface RecipeInput {
@@ -14,297 +20,375 @@ export interface RecipeInput {
   equipment: string[];
   ingredients: { name: string; qty: number; unit: string }[];
   steps: string[];
+  burners?: number; // available stove burners
 }
 
-export interface MasterTask {
-  /** Minute offset from time 0 when this task starts */
-  startMinute: number;
-  /** Estimated duration in minutes */
-  durationMinutes: number;
-  /** Which recipe this belongs to */
+export interface PhaseStep {
   recipeId: number;
   recipeName: string;
-  /** 0-based index into the recipe's original steps array */
   stepIndex: number;
-  /** The instruction text */
   instruction: string;
-  /** Equipment required, if any */
   equipment: string | null;
-  /** Category to help the UI display context */
-  type: "passive" | "active" | "consolidated";
-  /** If consolidated, which recipe names were merged */
-  consolidatedFrom?: string[];
+  isPassive: boolean;  // hands-off (baking, simmering)
+  isMise: boolean;     // pure prep (no heat)
+  durationMinutes: number;
 }
 
-// ─── Heuristics ───────────────────────────────────────────────────────────────
-
-/**
- * Passive keywords: steps where you walk away and the stove/oven does the work.
- * The cook is free to do other things during these.
- */
-const PASSIVE_KEYWORDS = [
-  "bake", "roast", "simmer", "boil", "broil", "rest", "marinate",
-  "soak", "chill", "refrigerate", "cool", "reduce", "pressure cook",
-  "slow cook", "caramelize", "let stand", "let sit", "set aside",
-];
-
-/**
- * Active keywords: steps that require constant attention.
- */
-const ACTIVE_KEYWORDS = [
-  "chop", "dice", "mince", "slice", "peel", "grate", "shred", "mix",
-  "whisk", "stir", "fold", "beat", "knead", "season", "combine",
-  "prep", "prepare", "measure", "crush", "squeeze", "mash",
-];
-
-/**
- * Consolidation patterns: if multiple recipes have similar early steps,
- * we merge them into one.
- */
-const CONSOLIDATION_PATTERNS = [
-  { pattern: /preheat.*oven/i, label: "Preheat oven" },
-  { pattern: /bring.*water.*boil/i, label: "Bring a pot of salted water to a boil" },
-  { pattern: /boil.*salted.*water/i, label: "Bring a pot of salted water to a boil" },
-  { pattern: /season.*salt.*pepper/i, label: "Season with salt & pepper (applies to all recipes)" },
-];
-
-function classifyStep(step: string): "passive" | "active" | "neutral" {
-  const lower = step.toLowerCase();
-  const passiveScore = PASSIVE_KEYWORDS.filter(k => lower.includes(k)).length;
-  const activeScore = ACTIVE_KEYWORDS.filter(k => lower.includes(k)).length;
-  if (passiveScore > activeScore) return "passive";
-  if (activeScore > passiveScore) return "active";
-  return "neutral";
+export interface CookingPhase {
+  phaseNumber: number;
+  name: string;           // Smart generated name
+  emoji: string;
+  description: string;    // One-line summary
+  steps: PhaseStep[];
+  estimatedMinutes: number;
+  isParallel: boolean;    // Multiple recipes active simultaneously
 }
 
-/**
- * Rough estimate of how long a step takes, in minutes.
- * Parsed from phrases like "30 minutes", "2 hours", "1-2 min".
- * Falls back to heuristics based on passive/active classification.
- */
-function estimateStepDuration(step: string, classification: string): number {
-  // Try to extract an explicit time mention
+// ─── Step Classification ───────────────────────────────────────────────────────
+
+const MISE_PATTERNS = /\b(chop|dice|mince|slice|peel|grate|shred|trim|cut|measure|crush|squeeze|mash|marinate|coat|season and set|toss.*before|prep|prepare|gather|pat dry|rinse|drain.*and set|mix.*together.*and set|whisk.*together.*and set|combine.*and set)\b/i;
+
+const PASSIVE_PATTERNS = /\b(bake|roast|simmer|boil|broil|rest|let stand|let sit|set aside|refrigerate|chill|reduce|pressure cook|slow cook|caramelize|steep|proof|rise)\b/i;
+
+const PREHEAT_PATTERN = /preheat|heat.*oven|turn.*oven/i;
+
+const SERVE_PATTERNS = /\b(serve|plate|garnish|enjoy|transfer.*plate|bring.*table|slice.*serve)\b/i;
+
+const WATER_ON_PATTERN = /bring.*water.*boil|pot.*water.*high|salted.*water.*boil|water.*boil/i;
+
+function classifyStep(step: string): { isMise: boolean; isPassive: boolean; isServe: boolean; isPreheat: boolean; isWaterOn: boolean } {
+  return {
+    isMise: MISE_PATTERNS.test(step) && !PASSIVE_PATTERNS.test(step),
+    isPassive: PASSIVE_PATTERNS.test(step),
+    isServe: SERVE_PATTERNS.test(step),
+    isPreheat: PREHEAT_PATTERN.test(step),
+    isWaterOn: WATER_ON_PATTERN.test(step),
+  };
+}
+
+function estimateDuration(step: string, isPassive: boolean): number {
   const hoursMatch = step.match(/(\d+(?:\.\d+)?)\s*hour/i);
   const minutesMatch = step.match(/(\d+)[\s-]*(?:to[\s-]*(\d+))?\s*min/i);
+  const secondsMatch = step.match(/(\d+)\s*second/i);
 
-  if (hoursMatch) {
-    return Math.round(parseFloat(hoursMatch[1]) * 60);
-  }
+  if (hoursMatch) return Math.round(parseFloat(hoursMatch[1]) * 60);
   if (minutesMatch) {
     const lo = parseInt(minutesMatch[1]);
     const hi = minutesMatch[2] ? parseInt(minutesMatch[2]) : lo;
     return Math.round((lo + hi) / 2);
   }
-
-  // Heuristic fallback
-  if (classification === "passive") return 20;
-  if (classification === "active") return 5;
-  return 3;
+  if (secondsMatch) return 1;
+  return isPassive ? 20 : 4;
 }
 
-/**
- * Determine what equipment a step primarily uses.
- */
-function detectStepEquipment(step: string, recipeEquipment: string[]): string | null {
-  const lower = step.toLowerCase();
-  if (/oven|bake|roast|broil/i.test(lower)) return "oven";
-  if (/stove|skillet|pan|pot|sauté|simmer|boil/i.test(lower)) return "stove";
-  if (/air fry/i.test(lower)) return "airFryer";
-  if (/instant pot|pressure cook/i.test(lower)) return "instantPot";
-  if (/microwave/i.test(lower)) return "microwave";
+function detectEquipment(step: string, recipeEquipment: string[]): string | null {
+  if (/oven|bake|roast|broil/i.test(step)) return "oven";
+  if (/air fry/i.test(step)) return "airFryer";
+  if (/instant pot|pressure cook/i.test(step)) return "instantPot";
+  if (/microwave/i.test(step)) return "microwave";
+  if (/stove|skillet|pan|pot|sauté|simmer|boil|wok|griddle|sear|fry/i.test(step)) return "stove";
   return recipeEquipment[0] ?? null;
+}
+
+// ─── Smart Phase Naming ────────────────────────────────────────────────────────
+
+interface PhaseCharacter {
+  hasPreheat: boolean;
+  hasChop: boolean;
+  hasBoilWater: boolean;
+  hasOven: boolean;
+  hasActiveStove: boolean;
+  hasPassive: boolean;
+  hasServe: boolean;
+  hasMarinate: boolean;
+  isMixedRecipes: boolean;
+  recipeNames: string[];
+  phaseIndex: number;
+  totalPhases: number;
+}
+
+function generatePhaseName(char: PhaseCharacter): { name: string; emoji: string; description: string } {
+  const { phaseIndex, totalPhases, hasChop, hasPreheat, hasBoilWater, hasOven, hasActiveStove, hasPassive, hasServe, hasMarinate, isMixedRecipes } = char;
+
+  // First phase — always setup
+  if (phaseIndex === 0) {
+    if (hasChop && hasPreheat && hasBoilWater) return { name: "The Setup", emoji: "🔪", description: "Preheat, prep, and get everything ready before the heat starts" };
+    if (hasChop && hasPreheat) return { name: "Prep & Preheat", emoji: "🔪", description: "Get your ingredients ready while the oven comes up to temp" };
+    if (hasChop && hasMarinate) return { name: "Prep & Marinate", emoji: "🔪", description: "Chop, measure, and let flavors start developing" };
+    if (hasChop) return { name: "Mise en Place", emoji: "🔪", description: "Chop, measure, and organize everything before cooking starts" };
+    if (hasPreheat) return { name: "The Warm-Up", emoji: "🔥", description: "Get the heat going before the real work begins" };
+    return { name: "The Setup", emoji: "⚙️", description: "Lay the groundwork before cooking begins" };
+  }
+
+  // Last phase — always the finish
+  if (phaseIndex === totalPhases - 1) {
+    if (hasServe) return { name: "Plate & Serve", emoji: "🍽️", description: "Rest, finish, and bring it all to the table" };
+    return { name: "The Finish Line", emoji: "🏁", description: "Final touches — you're almost there" };
+  }
+
+  // Middle phases — smart naming
+  if (hasOven && hasActiveStove && isMixedRecipes) return { name: "The Oven Sprint", emoji: "🔥", description: "Oven locked in, stovetop firing — both running at the same time" };
+  if (hasOven && !hasActiveStove) return { name: "The Waiting Game", emoji: "⏱️", description: "Things are in the oven — use this time wisely" };
+  if (hasBoilWater && hasPassive) return { name: "Start the Carbs", emoji: "🍝", description: "Get water boiling and long-cook items started" };
+  if (hasActiveStove && isMixedRecipes) return { name: "Active Cooking", emoji: "🍳", description: "Multiple pans going — stay focused and keep moving" };
+  if (hasActiveStove && !isMixedRecipes) return { name: "On the Heat", emoji: "🍳", description: "Stovetop time — watch the heat and keep stirring" };
+  if (hasPassive && isMixedRecipes) return { name: "The Simmer", emoji: "💧", description: "Let things cook while you prep the next recipe" };
+  if (hasPassive) return { name: "Let It Cook", emoji: "⏳", description: "Hands off — set a timer and step back" };
+  if (isMixedRecipes) return { name: "The Merge", emoji: "🔀", description: "Bring the recipes together for the home stretch" };
+
+  return { name: `Phase ${phaseIndex + 1}`, emoji: "🍴", description: "Next set of steps" };
 }
 
 // ─── Main Engine ──────────────────────────────────────────────────────────────
 
-export function buildParallelPlan(recipes: RecipeInput[]): MasterTask[] {
+export function buildParallelPlan(recipes: RecipeInput[], burnerCount = 2): CookingPhase[] {
   if (recipes.length === 0) return [];
 
-  // Step 1: Expand all recipes into raw tasks with classifications
-  interface RawTask {
+  // ── Step 1: Expand all steps with metadata ──
+  interface RawStep {
     recipeId: number;
     recipeName: string;
     stepIndex: number;
     instruction: string;
-    classification: "passive" | "active" | "neutral";
-    duration: number;
+    isMise: boolean;
+    isPassive: boolean;
+    isServe: boolean;
+    isPreheat: boolean;
+    isWaterOn: boolean;
     equipment: string | null;
-    recipeEquipment: string[];
-    cookTimeMinutes: number;
+    duration: number;
   }
 
-  const allRawTasks: RawTask[] = [];
-
+  const allSteps: RawStep[] = [];
   for (const recipe of recipes) {
     for (let i = 0; i < recipe.steps.length; i++) {
       const step = recipe.steps[i];
-      const classification = classifyStep(step);
-      const duration = estimateStepDuration(step, classification);
-      const equipment = detectStepEquipment(step, recipe.equipment);
-      allRawTasks.push({
+      const cls = classifyStep(step);
+      const eq = detectEquipment(step, recipe.equipment);
+      allSteps.push({
         recipeId: recipe.id,
         recipeName: recipe.name,
         stepIndex: i,
         instruction: step,
-        classification,
-        duration,
-        equipment,
-        recipeEquipment: recipe.equipment,
-        cookTimeMinutes: recipe.cookTimeMinutes,
+        ...cls,
+        equipment: eq,
+        duration: estimateDuration(step, cls.isPassive),
       });
     }
   }
 
-  // Step 2: Consolidation pass — find duplicate preheat/boil steps across recipes
-  const consolidationGroups: Map<string, RawTask[]> = new Map();
-  const consolidatedTaskIndices = new Set<number>();
+  // ── Step 2: Bucket steps into logical groups ──
+  // Priority order for phase assignment:
+  // 1. Preheat + boil water → Phase 1 (setup)
+  // 2. Pure mise en place (chop/measure/marinate, no heat) → Phase 1
+  // 3. Passive/long-cook starters (get things in the oven or pressure cooker) → Phase 2
+  // 4. Active parallel cooking phases (stove steps, grouped by recipe pairs)
+  // 5. Serve/rest/plate → Final phase
 
-  for (let i = 0; i < allRawTasks.length; i++) {
-    const task = allRawTasks[i];
-    for (const { pattern, label } of CONSOLIDATION_PATTERNS) {
-      if (pattern.test(task.instruction)) {
-        if (!consolidationGroups.has(label)) {
-          consolidationGroups.set(label, []);
-        }
-        consolidationGroups.get(label)!.push(task);
-        consolidatedTaskIndices.add(i);
+  // Maintain per-recipe step ordering (we can't reorder within a recipe)
+  // Track which recipe's steps we've assigned so far
+  const recipeStepCursor: Record<number, number> = {};
+  recipes.forEach(r => { recipeStepCursor[r.id] = 0; });
+
+  // Helper: get the next unassigned step for a recipe that matches a predicate
+  const assigned = new Set<string>(); // "recipeId-stepIndex"
+  const key = (s: RawStep) => `${s.recipeId}-${s.stepIndex}`;
+  const isAssigned = (s: RawStep) => assigned.has(key(s));
+  const assign = (s: RawStep) => assigned.add(key(s));
+
+  // We also need to track equipment usage to prevent conflicts
+  // (simplified: oven can only do one recipe at a time unless explicitly compatible)
+
+  const phases: PhaseStep[][] = [];
+
+  // Phase 0: Setup — ALWAYS group preheat, boil water, AND mise en place together
+  // These should run in parallel at the start across all recipes
+  const setupSteps: RawStep[] = [];
+
+  // First pass: preheat and water-on steps from ALL recipes (highest priority — start heat early)
+  for (const recipe of recipes) {
+    const recipeSteps = allSteps.filter(s => s.recipeId === recipe.id);
+    for (const s of recipeSteps) {
+      if (!isAssigned(s) && (s.isPreheat || s.isWaterOn)) {
+        setupSteps.push(s);
+        assign(s);
+      }
+    }
+  }
+
+  // Second pass: pure mise en place from all recipes (collect front-loaded prep steps)
+  for (const recipe of recipes) {
+    const recipeSteps = allSteps.filter(s => s.recipeId === recipe.id);
+    for (const s of recipeSteps) {
+      if (isAssigned(s)) continue;
+      // Include mise steps AND any early non-cooking steps
+      if (s.isMise && !s.isPassive) {
+        setupSteps.push(s);
+        assign(s);
+      } else {
+        // Stop collecting mise for this recipe once we hit a cooking step
         break;
       }
     }
   }
 
-  // Step 3: Build consolidated tasks (one per group)
-  const consolidatedTasks: MasterTask[] = [];
-  consolidationGroups.forEach((tasks, label) => {
-    if (tasks.length > 1) {
-      // Only consolidate when multiple recipes share the same step
-      consolidatedTasks.push({
-        startMinute: 0,
-        durationMinutes: tasks[0].duration,
-        recipeId: tasks[0].recipeId,
-        recipeName: "All Recipes",
-        stepIndex: -1,
-        instruction: `${label} (shared across: ${tasks.map(t => t.recipeName).join(", ")})`,
-        equipment: tasks[0].equipment,
-        type: "consolidated",
-        consolidatedFrom: tasks.map(t => t.recipeName),
-      });
-    } else {
-      // Only one recipe has this step — keep it but remove from consolidated set
-      consolidatedTaskIndices.delete(allRawTasks.indexOf(tasks[0]));
-    }
+  // Third pass: also grab preheat/boil steps that appear later in recipes
+  // (some recipes list preheat mid-recipe — still group them in setup if not assigned yet)
+  allSteps.filter(s => (s.isPreheat || s.isWaterOn) && !isAssigned(s)).forEach(s => {
+    setupSteps.push(s);
+    assign(s);
   });
 
-  // Step 4: Separate remaining tasks into passive and active buckets per recipe
-  const passiveTasks: RawTask[] = [];
-  const activeTasks: RawTask[] = [];
+  if (setupSteps.length > 0) phases.push(setupSteps);
 
-  for (let i = 0; i < allRawTasks.length; i++) {
-    if (consolidatedTaskIndices.has(i)) continue;
-    const t = allRawTasks[i];
-    if (t.classification === "passive") {
-      passiveTasks.push(t);
-    } else {
-      activeTasks.push(t);
+  // Remaining unassigned steps: build phases greedily
+  // Strategy: for each iteration, collect the "next available" step from each recipe
+  // that doesn't conflict with already-running equipment. Group them into a phase.
+  // Repeat until all steps are assigned.
+
+  const equipmentBusy: Record<string, number> = {}; // equipment → minutes it's busy
+  let iteration = 0;
+
+  while (assigned.size < allSteps.length && iteration < 50) {
+    iteration++;
+    const phaseSteps: RawStep[] = [];
+    const equipmentUsedThisPhase = new Set<string>();
+    const stoveSlotsUsed = { count: 0 };
+
+    for (const recipe of recipes) {
+      const remaining = allSteps.filter(s => s.recipeId === recipe.id && !isAssigned(s));
+      if (remaining.length === 0) continue;
+
+      // Get the next step for this recipe
+      const next = remaining[0];
+
+      // Check equipment availability
+      const eq = next.equipment;
+      let canAdd = true;
+
+      if (eq === "stove") {
+        // Can add stove step if we have burner slots
+        if (stoveSlotsUsed.count >= burnerCount) {
+          // Check if any of the current phase's stove steps is from a different recipe
+          const stoveStepsInPhase = phaseSteps.filter(s => s.equipment === "stove");
+          if (stoveStepsInPhase.length >= burnerCount) canAdd = false;
+        }
+        if (canAdd) stoveSlotsUsed.count++;
+      } else if (eq && equipmentUsedThisPhase.has(eq)) {
+        // Non-stove equipment is exclusive per phase (only one recipe can use oven at a time)
+        canAdd = false;
+      }
+
+      if (canAdd) {
+        phaseSteps.push(next);
+        assign(next);
+        if (eq && eq !== "stove") equipmentUsedThisPhase.add(eq);
+      }
+    }
+
+    // If we couldn't add anything in this pass, force-add the next unassigned step
+    // to prevent infinite loops
+    if (phaseSteps.length === 0) {
+      const firstUnassigned = allSteps.find(s => !isAssigned(s));
+      if (firstUnassigned) {
+        phaseSteps.push(firstUnassigned);
+        assign(firstUnassigned);
+      }
+    }
+
+    // Collect consecutive follow-up steps that naturally belong with this phase
+    // (serve/plate steps that immediately follow the recipe's last active step)
+    const serveSteps: RawStep[] = [];
+    for (const recipe of recipes) {
+      const remaining = allSteps.filter(s => s.recipeId === recipe.id && !isAssigned(s));
+      if (remaining.length > 0 && remaining[0].isServe) {
+        serveSteps.push(remaining[0]);
+        assign(remaining[0]);
+      }
+    }
+
+    if (phaseSteps.length > 0 || serveSteps.length > 0) {
+      phases.push([...phaseSteps, ...serveSteps]);
     }
   }
 
-  // Sort passive tasks by recipe total cook time desc (longest recipe goes first)
-  passiveTasks.sort((a, b) => b.cookTimeMinutes - a.cookTimeMinutes);
-
-  // Step 5: Schedule — greedy timeline placement
-  // We track a cursor per equipment type and a global cursor for active tasks
-  const equipmentCursor: Record<string, number> = {};
-  const recipeCursor: Record<number, number> = {}; // last minute used per recipe
-
-  const getRecipeCursor = (id: number) => recipeCursor[id] ?? 0;
-  const getEquipCursor = (eq: string | null) => eq ? (equipmentCursor[eq] ?? 0) : 0;
-
-  const advanceRecipeCursor = (id: number, until: number) => {
-    recipeCursor[id] = Math.max(getRecipeCursor(id), until);
-  };
-  const advanceEquipCursor = (eq: string | null, until: number) => {
-    if (eq) equipmentCursor[eq] = Math.max(getEquipCursor(eq), until);
-  };
-
-  const scheduled: MasterTask[] = [];
-
-  // Place consolidated tasks at minute 0
-  let consolidatedOffset = 0;
-  for (const ct of consolidatedTasks) {
-    const start = consolidatedOffset;
-    ct.startMinute = start;
-    consolidatedOffset += ct.durationMinutes;
-    advanceEquipCursor(ct.equipment, consolidatedOffset);
-    // All participating recipes inherit this cursor
-    ct.consolidatedFrom?.forEach(name => {
-      const r = recipes.find(r => r.name === name);
-      if (r) advanceRecipeCursor(r.id, consolidatedOffset);
-    });
-    scheduled.push(ct);
+  // Catch any remaining serve/finish steps
+  const remaining = allSteps.filter(s => !isAssigned(s));
+  if (remaining.length > 0) {
+    phases.push(remaining);
+    remaining.forEach(s => assign(s));
   }
 
-  // Place passive tasks — they define the skeleton of the schedule
-  for (const task of passiveTasks) {
-    const earliest = Math.max(
-      getRecipeCursor(task.recipeId),
-      getEquipCursor(task.equipment)
-    );
-    const start = earliest;
-    const end = start + task.duration;
-
-    scheduled.push({
-      startMinute: start,
-      durationMinutes: task.duration,
-      recipeId: task.recipeId,
-      recipeName: task.recipeName,
-      stepIndex: task.stepIndex,
-      instruction: task.instruction,
-      equipment: task.equipment,
-      type: "passive",
-    });
-
-    advanceRecipeCursor(task.recipeId, end);
-    advanceEquipCursor(task.equipment, end);
+  // ── Step 3: Merge small phases if total > 6 ──
+  // If we ended up with too many tiny phases, merge adjacent ones
+  const mergeThreshold = 6;
+  let mergedPhases = phases;
+  if (phases.length > mergeThreshold) {
+    // Merge phases 1 and 2 if both small
+    mergedPhases = [];
+    let i = 0;
+    while (i < phases.length) {
+      if (i === 0 && phases.length > mergeThreshold) {
+        // Keep phase 0 (setup) intact
+        mergedPhases.push(phases[i]);
+        i++;
+      } else if (i < phases.length - 1 && phases[i].length <= 2 && phases[i + 1].length <= 2) {
+        mergedPhases.push([...phases[i], ...phases[i + 1]]);
+        i += 2;
+      } else {
+        mergedPhases.push(phases[i]);
+        i++;
+      }
+    }
   }
 
-  // Place active tasks — fill idle windows
-  // Sort active tasks to maximize utilization: try to fill gaps in passive schedules
-  activeTasks.sort((a, b) => getRecipeCursor(a.recipeId) - getRecipeCursor(b.recipeId));
+  // ── Step 4: Convert to CookingPhase objects with smart names ──
+  return mergedPhases
+    .filter(steps => steps.length > 0)
+    .map((steps, idx, arr) => {
+      const recipeIds = new Set(steps.map(s => s.recipeId));
+      const equipments = new Set(steps.map(s => s.equipment).filter(Boolean));
+      const char: PhaseCharacter = {
+        phaseIndex: idx,
+        totalPhases: arr.length,
+        hasPreheat: steps.some(s => s.isPreheat),
+        hasChop: steps.some(s => s.isMise && !s.isPreheat && !s.isWaterOn),
+        hasBoilWater: steps.some(s => s.isWaterOn),
+        hasOven: equipments.has("oven"),
+        hasActiveStove: steps.some(s => s.equipment === "stove" && !s.isPassive),
+        hasPassive: steps.some(s => s.isPassive),
+        hasServe: steps.some(s => s.isServe),
+        hasMarinate: steps.some(s => /marinate|coat|season/i.test(s.instruction)),
+        isMixedRecipes: recipeIds.size > 1,
+        recipeNames: [...recipeIds].map(id => recipes.find(r => r.id === id)?.name ?? ""),
+      };
 
-  for (const task of activeTasks) {
-    const earliest = Math.max(
-      getRecipeCursor(task.recipeId),
-      getEquipCursor(task.equipment)
-    );
-    const start = earliest;
-    const end = start + task.duration;
+      const { name, emoji, description } = generatePhaseName(char);
+      const isParallel = recipeIds.size > 1 && steps.some(s => steps.some(
+        t => t.recipeId !== s.recipeId && Math.abs(s.stepIndex - t.stepIndex) < 3
+      ));
 
-    scheduled.push({
-      startMinute: start,
-      durationMinutes: task.duration,
-      recipeId: task.recipeId,
-      recipeName: task.recipeName,
-      stepIndex: task.stepIndex,
-      instruction: task.instruction,
-      equipment: task.equipment,
-      type: "active",
+      const phaseSteps: PhaseStep[] = steps.map(s => ({
+        recipeId: s.recipeId,
+        recipeName: s.recipeName,
+        stepIndex: s.stepIndex,
+        instruction: s.instruction,
+        equipment: s.equipment,
+        isPassive: s.isPassive,
+        isMise: s.isMise,
+        durationMinutes: s.duration,
+      }));
+
+      const estimatedMinutes = Math.max(...steps.map(s => s.duration));
+
+      return {
+        phaseNumber: idx + 1,
+        name,
+        emoji,
+        description,
+        steps: phaseSteps,
+        estimatedMinutes,
+        isParallel,
+      };
     });
-
-    advanceRecipeCursor(task.recipeId, end);
-    advanceEquipCursor(task.equipment, end);
-  }
-
-  // Step 6: Sort the final plan chronologically
-  // Ties broken by: consolidated first → passive → active → by recipe name
-  const typeOrder = { consolidated: 0, passive: 1, active: 2 };
-  scheduled.sort((a, b) => {
-    if (a.startMinute !== b.startMinute) return a.startMinute - b.startMinute;
-    const typeA = typeOrder[a.type] ?? 2;
-    const typeB = typeOrder[b.type] ?? 2;
-    if (typeA !== typeB) return typeA - typeB;
-    return a.recipeName.localeCompare(b.recipeName);
-  });
-
-  return scheduled;
 }
