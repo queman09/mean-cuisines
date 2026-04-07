@@ -4,11 +4,18 @@ import { storage } from "./storage";
 import { insertRecipeSchema, insertContributorSchema } from "@shared/schema";
 import { z } from "zod";
 import { buildParallelPlan } from "./parallelEngine";
+import { importRecipeFromUrl } from "./recipeImporter";
 
 // Seed default data if empty
 function seedIfEmpty() {
   const existingContributors = storage.getContributors();
-  if (existingContributors.length === 0) {
+  const existingRecipes = storage.getRecipes();
+  // Re-seed if we have fewer than 30 recipes (handles Railway's stale DB)
+  if (existingContributors.length === 0 || existingRecipes.length < 30) {
+    // Clear existing data first so we don't get duplicates
+    // Delete all existing recipes and contributors so we can re-seed clean
+    existingRecipes.forEach(r => storage.deleteRecipe(r.id));
+    existingContributors.forEach(c => storage.deleteContributor(c.id));
     // Seed contributors
     const admin = storage.createContributor({
       name: "Mean Cuisines",
@@ -241,7 +248,7 @@ function seedIfEmpty() {
         "Add pasta to the sauce. Stir to combine and serve hot.",
       ]),
       tags: JSON.stringify(["vegetarian", "comfort", "family"]),
-      imageUrl: "https://images.unsplash.com/photo-1612152328957-bfc11c5cebf8?w=600&q=80",
+      imageUrl: "https://images.unsplash.com/photo-1476124369491-e7addf5db371?w=600&q=80",
       contributorId: chef2.id,
       sourceUrl: null,
     });
@@ -362,7 +369,7 @@ function seedIfEmpty() {
         "Broil until cheese is bubbly and golden, 2-3 minutes. Serve immediately.",
       ]),
       tags: JSON.stringify(["soup", "french", "comfort"]),
-      imageUrl: "https://images.unsplash.com/photo-1584811644165-33db2bfcdfb4?w=600&q=80",
+      imageUrl: "https://images.unsplash.com/photo-1547592166-23ac45744acd?w=600&q=80",
       contributorId: chef1.id,
       sourceUrl: null,
     });
@@ -668,6 +675,479 @@ function seedIfEmpty() {
       contributorId: chef4.id,
       sourceUrl: null,
     });
+
+    // ── 16 more recipes ────────────────────────────────────────────────────────
+
+    storage.createRecipe({
+      name: "Spaghetti Carbonara",
+      description: "Classic Roman pasta with eggs, guanciale, and Pecorino — no cream needed. Rich, silky, and done in 20 minutes.",
+      cookTimeMinutes: 20,
+      servings: 4,
+      equipment: JSON.stringify(["stove"]),
+      ingredients: JSON.stringify([
+        { name: "Spaghetti", qty: 12, unit: "oz" },
+        { name: "Pancetta or bacon, diced", qty: 6, unit: "oz" },
+        { name: "Eggs", qty: 3, unit: "" },
+        { name: "Egg yolks", qty: 2, unit: "" },
+        { name: "Pecorino Romano or Parmesan, grated", qty: 1, unit: "cup" },
+        { name: "Black pepper", qty: 1, unit: "tsp, coarsely ground" },
+        { name: "Salt", qty: 0, unit: "to taste" },
+      ]),
+      steps: JSON.stringify([
+        "Cook spaghetti in heavily salted boiling water until al dente. Reserve 1 cup pasta water.",
+        "Cook pancetta in a skillet over medium heat until crispy. Remove from heat.",
+        "Whisk eggs, yolks, and cheese together in a bowl. Season with lots of black pepper.",
+        "Add hot pasta to the pan with pancetta (off heat). Toss to coat.",
+        "Pour egg mixture over pasta, tossing rapidly, adding pasta water a splash at a time until creamy.",
+        "Serve immediately with extra cheese and black pepper.",
+      ]),
+      tags: JSON.stringify(["italian", "quick", "pasta"]),
+      imageUrl: "https://images.unsplash.com/photo-1612874742237-6526221588e3?w=600&q=80",
+      contributorId: chef1.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Teriyaki Chicken",
+      description: "Tender pan-seared chicken thighs glazed in a sweet-savory homemade teriyaki sauce. Better than takeout.",
+      cookTimeMinutes: 25,
+      servings: 4,
+      equipment: JSON.stringify(["stove"]),
+      ingredients: JSON.stringify([
+        { name: "Boneless chicken thighs", qty: 1.5, unit: "lbs" },
+        { name: "Soy sauce", qty: 0.25, unit: "cup" },
+        { name: "Mirin or rice wine", qty: 3, unit: "tbsp" },
+        { name: "Honey or sugar", qty: 2, unit: "tbsp" },
+        { name: "Garlic cloves, minced", qty: 2, unit: "" },
+        { name: "Ginger, grated", qty: 1, unit: "tsp" },
+        { name: "Sesame oil", qty: 1, unit: "tsp" },
+        { name: "Cornstarch", qty: 1, unit: "tsp" },
+        { name: "Sesame seeds & green onion", qty: 0, unit: "for garnish" },
+      ]),
+      steps: JSON.stringify([
+        "Mix soy sauce, mirin, honey, garlic, ginger, sesame oil, and cornstarch in a bowl.",
+        "Season chicken with pepper. Sear in oil over medium-high heat, 4-5 minutes per side until cooked through.",
+        "Pour sauce over chicken. Simmer 2-3 minutes, flipping, until sauce thickens and coats.",
+        "Slice and serve over rice. Garnish with sesame seeds and sliced green onion.",
+      ]),
+      tags: JSON.stringify(["asian", "quick", "chicken"]),
+      imageUrl: "https://images.unsplash.com/photo-1569050467447-ce54b3bbc37d?w=600&q=80",
+      contributorId: chef3.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Shakshuka",
+      description: "Eggs poached in a spiced tomato and pepper sauce. A Middle Eastern breakfast favorite that works any time of day.",
+      cookTimeMinutes: 30,
+      servings: 4,
+      equipment: JSON.stringify(["stove"]),
+      ingredients: JSON.stringify([
+        { name: "Eggs", qty: 6, unit: "" },
+        { name: "Crushed tomatoes", qty: 1, unit: "28-oz can" },
+        { name: "Red bell pepper, diced", qty: 1, unit: "" },
+        { name: "Onion, diced", qty: 1, unit: "" },
+        { name: "Garlic cloves, minced", qty: 4, unit: "" },
+        { name: "Cumin", qty: 1, unit: "tsp" },
+        { name: "Smoked paprika", qty: 1, unit: "tsp" },
+        { name: "Cayenne", qty: 0.25, unit: "tsp" },
+        { name: "Olive oil", qty: 2, unit: "tbsp" },
+        { name: "Feta cheese, crumbled", qty: 0.5, unit: "cup" },
+        { name: "Fresh parsley", qty: 0, unit: "to garnish" },
+      ]),
+      steps: JSON.stringify([
+        "Sauté onion and bell pepper in olive oil over medium heat until soft, 7 minutes.",
+        "Add garlic, cumin, paprika, and cayenne. Cook 1 minute.",
+        "Add crushed tomatoes. Simmer 10 minutes. Season with salt and pepper.",
+        "Make 6 wells in the sauce. Crack an egg into each well.",
+        "Cover and cook 5-8 minutes until whites are set but yolks are still runny.",
+        "Top with crumbled feta and fresh parsley. Serve with crusty bread.",
+      ]),
+      tags: JSON.stringify(["vegetarian", "breakfast", "middle-eastern"]),
+      imageUrl: "https://images.unsplash.com/photo-1590412200988-a436970781fa?w=600&q=80",
+      contributorId: chef3.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Beef Stir Fry",
+      description: "Tender beef strips and crisp vegetables in a savory sauce. Fast, satisfying, and endlessly customizable.",
+      cookTimeMinutes: 20,
+      servings: 4,
+      equipment: JSON.stringify(["stove"]),
+      ingredients: JSON.stringify([
+        { name: "Flank steak, thinly sliced", qty: 1, unit: "lb" },
+        { name: "Broccoli florets", qty: 2, unit: "cups" },
+        { name: "Bell peppers, sliced", qty: 2, unit: "" },
+        { name: "Garlic cloves, minced", qty: 3, unit: "" },
+        { name: "Ginger, grated", qty: 1, unit: "tbsp" },
+        { name: "Soy sauce", qty: 3, unit: "tbsp" },
+        { name: "Oyster sauce", qty: 2, unit: "tbsp" },
+        { name: "Sesame oil", qty: 1, unit: "tbsp" },
+        { name: "Cornstarch", qty: 1, unit: "tbsp" },
+        { name: "Vegetable oil", qty: 2, unit: "tbsp" },
+      ]),
+      steps: JSON.stringify([
+        "Toss beef with soy sauce and cornstarch. Marinate 10 minutes.",
+        "Mix oyster sauce, sesame oil, and 2 tbsp water into a sauce. Set aside.",
+        "Sear beef over screaming-hot wok in batches, 1 min each side. Remove.",
+        "Stir fry broccoli and peppers 3-4 minutes until tender-crisp.",
+        "Add garlic and ginger, 30 seconds. Return beef and pour sauce over.",
+        "Toss everything together 1 minute. Serve over rice.",
+      ]),
+      tags: JSON.stringify(["asian", "quick", "beef"]),
+      imageUrl: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600&q=80",
+      contributorId: chef4.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Creamy Tomato Soup",
+      description: "Velvety roasted tomato soup with fresh basil and a swirl of cream. Pairs perfectly with grilled cheese.",
+      cookTimeMinutes: 45,
+      servings: 4,
+      equipment: JSON.stringify(["oven", "stove"]),
+      ingredients: JSON.stringify([
+        { name: "Roma tomatoes, halved", qty: 2, unit: "lbs" },
+        { name: "Onion, quartered", qty: 1, unit: "" },
+        { name: "Garlic cloves", qty: 6, unit: "" },
+        { name: "Olive oil", qty: 3, unit: "tbsp" },
+        { name: "Chicken or vegetable broth", qty: 2, unit: "cups" },
+        { name: "Heavy cream", qty: 0.5, unit: "cup" },
+        { name: "Fresh basil", qty: 0.25, unit: "cup" },
+        { name: "Salt & pepper", qty: 0, unit: "to taste" },
+      ]),
+      steps: JSON.stringify([
+        "Preheat oven to 425°F. Place tomatoes, onion, and garlic on a baking sheet.",
+        "Drizzle with olive oil, season with salt. Roast 25-30 minutes until caramelized.",
+        "Transfer roasted vegetables to a pot with broth. Simmer 5 minutes.",
+        "Add basil, then blend smooth with an immersion blender.",
+        "Stir in cream. Taste and season. Serve with crusty bread.",
+      ]),
+      tags: JSON.stringify(["soup", "vegetarian", "comfort"]),
+      imageUrl: "https://images.unsplash.com/photo-1547592166-23ac45744acd?w=600&q=80",
+      contributorId: chef1.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Air Fryer Salmon",
+      description: "Perfectly cooked salmon fillets with a crisp exterior and flaky interior — in just 10 minutes.",
+      cookTimeMinutes: 12,
+      servings: 2,
+      equipment: JSON.stringify(["airFryer"]),
+      ingredients: JSON.stringify([
+        { name: "Salmon fillets", qty: 2, unit: "6-oz" },
+        { name: "Olive oil", qty: 1, unit: "tbsp" },
+        { name: "Garlic powder", qty: 0.5, unit: "tsp" },
+        { name: "Paprika", qty: 0.5, unit: "tsp" },
+        { name: "Salt & pepper", qty: 0, unit: "to taste" },
+        { name: "Lemon wedges", qty: 0, unit: "to serve" },
+      ]),
+      steps: JSON.stringify([
+        "Pat salmon dry. Brush with olive oil.",
+        "Mix garlic powder, paprika, salt, and pepper. Rub over salmon.",
+        "Preheat air fryer to 400°F for 2 minutes.",
+        "Place salmon skin-side down in air fryer basket.",
+        "Cook 8-10 minutes until salmon flakes easily. Serve with lemon.",
+      ]),
+      tags: JSON.stringify(["seafood", "quick", "healthy"]),
+      imageUrl: "https://images.unsplash.com/photo-1519708227418-c8fd9a32b7a2?w=600&q=80",
+      contributorId: admin.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Overnight Oats",
+      description: "No-cook breakfast prep. Layer oats, milk, and toppings the night before — grab and go in the morning.",
+      cookTimeMinutes: 5,
+      servings: 2,
+      equipment: JSON.stringify(["counter"]),
+      ingredients: JSON.stringify([
+        { name: "Rolled oats", qty: 1, unit: "cup" },
+        { name: "Milk or almond milk", qty: 1, unit: "cup" },
+        { name: "Greek yogurt", qty: 0.5, unit: "cup" },
+        { name: "Chia seeds", qty: 1, unit: "tbsp" },
+        { name: "Honey or maple syrup", qty: 1, unit: "tbsp" },
+        { name: "Vanilla extract", qty: 0.5, unit: "tsp" },
+        { name: "Fresh berries or banana", qty: 0, unit: "to top" },
+      ]),
+      steps: JSON.stringify([
+        "Combine oats, milk, yogurt, chia seeds, honey, and vanilla in a jar.",
+        "Stir well to combine.",
+        "Cover and refrigerate overnight or at least 4 hours.",
+        "In the morning, top with fresh fruit and enjoy cold.",
+      ]),
+      tags: JSON.stringify(["breakfast", "meal-prep", "healthy", "no-cook"]),
+      imageUrl: "https://images.unsplash.com/photo-1586511925558-a4c6376fe65f?w=600&q=80",
+      contributorId: chef1.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Butter Chicken",
+      description: "Creamy, mildly spiced tomato-butter sauce with tender chicken. India's most beloved comfort dish.",
+      cookTimeMinutes: 45,
+      servings: 4,
+      equipment: JSON.stringify(["stove"]),
+      ingredients: JSON.stringify([
+        { name: "Boneless chicken breast, cubed", qty: 1.5, unit: "lbs" },
+        { name: "Butter", qty: 4, unit: "tbsp" },
+        { name: "Onion, diced", qty: 1, unit: "" },
+        { name: "Garlic cloves, minced", qty: 4, unit: "" },
+        { name: "Ginger, grated", qty: 1, unit: "tbsp" },
+        { name: "Garam masala", qty: 2, unit: "tsp" },
+        { name: "Turmeric", qty: 0.5, unit: "tsp" },
+        { name: "Crushed tomatoes", qty: 1, unit: "14-oz can" },
+        { name: "Heavy cream", qty: 0.75, unit: "cup" },
+        { name: "Fenugreek leaves (kasuri methi)", qty: 1, unit: "tsp" },
+      ]),
+      steps: JSON.stringify([
+        "Sear chicken in 2 tbsp butter over high heat until golden. Set aside.",
+        "In same pan, melt remaining butter. Sauté onion until golden (8 min).",
+        "Add garlic, ginger, and spices. Cook 2 minutes until fragrant.",
+        "Add crushed tomatoes. Simmer 15 minutes.",
+        "Blend sauce smooth if desired. Add cream and fenugreek.",
+        "Return chicken to sauce. Simmer 10 minutes. Serve with naan or rice.",
+      ]),
+      tags: JSON.stringify(["indian", "comfort", "chicken"]),
+      imageUrl: "https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=600&q=80",
+      contributorId: chef3.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Greek Salad",
+      description: "Crisp vegetables, olives, and feta in a bright lemon-herb dressing. Classic, fresh, and ready in 10 minutes.",
+      cookTimeMinutes: 10,
+      servings: 4,
+      equipment: JSON.stringify(["counter"]),
+      ingredients: JSON.stringify([
+        { name: "English cucumber, chunked", qty: 1, unit: "" },
+        { name: "Cherry tomatoes, halved", qty: 2, unit: "cups" },
+        { name: "Red onion, thinly sliced", qty: 0.5, unit: "" },
+        { name: "Kalamata olives", qty: 0.5, unit: "cup" },
+        { name: "Feta cheese, chunked", qty: 6, unit: "oz" },
+        { name: "Olive oil", qty: 3, unit: "tbsp" },
+        { name: "Lemon juice", qty: 2, unit: "tbsp" },
+        { name: "Dried oregano", qty: 1, unit: "tsp" },
+        { name: "Salt & pepper", qty: 0, unit: "to taste" },
+      ]),
+      steps: JSON.stringify([
+        "Combine cucumber, tomatoes, red onion, and olives in a large bowl.",
+        "Whisk olive oil, lemon juice, oregano, salt, and pepper.",
+        "Pour dressing over salad and toss gently.",
+        "Top with feta chunks. Serve immediately.",
+      ]),
+      tags: JSON.stringify(["vegetarian", "healthy", "no-cook", "salad"]),
+      imageUrl: "https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=600&q=80",
+      contributorId: chef2.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Pulled Pork",
+      description: "Low-and-slow oven-braised pork shoulder with a smoky dry rub — shreddable, tender, and made for sandwiches.",
+      cookTimeMinutes: 270,
+      servings: 8,
+      equipment: JSON.stringify(["oven"]),
+      ingredients: JSON.stringify([
+        { name: "Pork shoulder (bone-in)", qty: 4, unit: "lbs" },
+        { name: "Brown sugar", qty: 2, unit: "tbsp" },
+        { name: "Smoked paprika", qty: 2, unit: "tbsp" },
+        { name: "Garlic powder", qty: 1, unit: "tbsp" },
+        { name: "Onion powder", qty: 1, unit: "tbsp" },
+        { name: "Cumin", qty: 1, unit: "tsp" },
+        { name: "Cayenne", qty: 0.5, unit: "tsp" },
+        { name: "Apple cider vinegar", qty: 0.25, unit: "cup" },
+        { name: "BBQ sauce", qty: 1, unit: "cup" },
+      ]),
+      steps: JSON.stringify([
+        "Mix all dry rub ingredients together. Score pork and rub all over generously.",
+        "Place in a roasting pan. Add ¼ cup water to the bottom.",
+        "Cover tightly with foil. Roast at 300°F for 4-4.5 hours.",
+        "Uncover for the last 30 minutes to brown the bark.",
+        "Rest 20 minutes. Shred with two forks, discarding fat.",
+        "Toss with BBQ sauce and apple cider vinegar. Serve on buns.",
+      ]),
+      tags: JSON.stringify(["bbq", "meal-prep", "weekend", "pork"]),
+      imageUrl: "https://images.unsplash.com/photo-1544025162-d76694265947?w=600&q=80",
+      contributorId: admin.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Vegetable Curry",
+      description: "A hearty, fragrant vegetable curry loaded with chickpeas, potatoes, and spinach in a coconut-tomato base.",
+      cookTimeMinutes: 40,
+      servings: 4,
+      equipment: JSON.stringify(["stove"]),
+      ingredients: JSON.stringify([
+        { name: "Chickpeas, drained", qty: 1, unit: "15-oz can" },
+        { name: "Potatoes, cubed", qty: 2, unit: "medium" },
+        { name: "Spinach", qty: 3, unit: "cups" },
+        { name: "Coconut milk", qty: 1, unit: "14-oz can" },
+        { name: "Diced tomatoes", qty: 1, unit: "14-oz can" },
+        { name: "Onion, diced", qty: 1, unit: "" },
+        { name: "Garlic cloves, minced", qty: 3, unit: "" },
+        { name: "Ginger, grated", qty: 1, unit: "tsp" },
+        { name: "Curry powder", qty: 2, unit: "tbsp" },
+        { name: "Garam masala", qty: 1, unit: "tsp" },
+      ]),
+      steps: JSON.stringify([
+        "Sauté onion in oil until softened (5 min). Add garlic, ginger, curry powder, garam masala.",
+        "Cook spices 1 minute, then add diced tomatoes. Simmer 5 minutes.",
+        "Add potatoes and coconut milk. Simmer 15-20 minutes until potatoes are tender.",
+        "Stir in chickpeas and spinach. Cook 3 more minutes until spinach wilts.",
+        "Season with salt and serve over rice with naan.",
+      ]),
+      tags: JSON.stringify(["vegan", "vegetarian", "indian", "healthy"]),
+      imageUrl: "https://images.unsplash.com/photo-1585937421612-70a008356fbe?w=600&q=80",
+      contributorId: chef3.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Grilled Cheese & Tomato",
+      description: "The ultimate comfort sandwich — buttery, golden bread with stretchy melted cheese and ripe tomato slices.",
+      cookTimeMinutes: 10,
+      servings: 2,
+      equipment: JSON.stringify(["stove"]),
+      ingredients: JSON.stringify([
+        { name: "Bread slices", qty: 4, unit: "" },
+        { name: "Butter, softened", qty: 3, unit: "tbsp" },
+        { name: "American or cheddar cheese", qty: 4, unit: "slices" },
+        { name: "Tomato, sliced", qty: 1, unit: "large" },
+        { name: "Garlic powder", qty: 0, unit: "pinch (optional)" },
+      ]),
+      steps: JSON.stringify([
+        "Butter one side of each bread slice. Add a pinch of garlic powder to the butter if using.",
+        "Heat skillet over medium-low. Place bread butter-side down.",
+        "Layer cheese and tomato slices on one slice. Top with second slice, butter-side up.",
+        "Cook 3-4 minutes per side, pressing gently, until golden and cheese is melted.",
+        "Slice diagonally and serve hot.",
+      ]),
+      tags: JSON.stringify(["vegetarian", "quick", "comfort", "sandwich"]),
+      imageUrl: "https://images.unsplash.com/photo-1528735602780-2552fd46c7af?w=600&q=80",
+      contributorId: chef2.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Instant Pot Chicken & Rice",
+      description: "One-pot chicken thighs and rice cooked perfectly together in the Instant Pot. Easy weeknight dinner.",
+      cookTimeMinutes: 35,
+      servings: 4,
+      equipment: JSON.stringify(["instantPot"]),
+      ingredients: JSON.stringify([
+        { name: "Bone-in chicken thighs", qty: 4, unit: "" },
+        { name: "Long grain white rice", qty: 1.5, unit: "cups" },
+        { name: "Chicken broth", qty: 1.5, unit: "cups" },
+        { name: "Onion, diced", qty: 1, unit: "" },
+        { name: "Garlic cloves, minced", qty: 3, unit: "" },
+        { name: "Paprika", qty: 1, unit: "tsp" },
+        { name: "Italian seasoning", qty: 1, unit: "tsp" },
+        { name: "Salt & pepper", qty: 0, unit: "to taste" },
+      ]),
+      steps: JSON.stringify([
+        "Season chicken with paprika, Italian seasoning, salt, and pepper.",
+        "Use Sauté mode to brown chicken 3 min per side. Remove.",
+        "Sauté onion and garlic 2 minutes. Add rice and stir to toast slightly.",
+        "Add broth. Place chicken on top. Lock lid.",
+        "Pressure cook on High for 10 minutes. Natural release 10 minutes, then quick release.",
+        "Fluff rice and serve.",
+      ]),
+      tags: JSON.stringify(["chicken", "one-pot", "meal-prep"]),
+      imageUrl: "https://images.unsplash.com/photo-1563379926898-05f4575a45d8?w=600&q=80",
+      contributorId: chef2.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Air Fryer French Fries",
+      description: "Crispy, golden homemade fries with barely any oil. Season any way you like — classic salt, cajun, or garlic parmesan.",
+      cookTimeMinutes: 30,
+      servings: 3,
+      equipment: JSON.stringify(["airFryer"]),
+      ingredients: JSON.stringify([
+        { name: "Russet potatoes", qty: 3, unit: "large" },
+        { name: "Olive oil", qty: 1, unit: "tbsp" },
+        { name: "Salt", qty: 1, unit: "tsp" },
+        { name: "Garlic powder", qty: 0.5, unit: "tsp" },
+        { name: "Paprika", qty: 0.5, unit: "tsp" },
+      ]),
+      steps: JSON.stringify([
+        "Cut potatoes into ¼-inch sticks. Soak in cold water 20 minutes. Drain and pat very dry.",
+        "Toss with olive oil, salt, garlic powder, and paprika.",
+        "Arrange in a single layer in air fryer basket (cook in batches).",
+        "Air fry at 380°F for 15 minutes. Shake basket, then cook 5 more minutes until crispy.",
+        "Season immediately and serve hot.",
+      ]),
+      tags: JSON.stringify(["vegetarian", "side", "crispy", "snack"]),
+      imageUrl: "https://images.unsplash.com/photo-1576107232684-1279f390859f?w=600&q=80",
+      contributorId: chef4.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Avocado Toast",
+      description: "Creamy smashed avocado on thick toast with everything bagel seasoning and a soft-boiled egg. Café-quality at home.",
+      cookTimeMinutes: 10,
+      servings: 2,
+      equipment: JSON.stringify(["stove", "counter"]),
+      ingredients: JSON.stringify([
+        { name: "Thick bread slices (sourdough)", qty: 2, unit: "" },
+        { name: "Ripe avocados", qty: 2, unit: "" },
+        { name: "Eggs", qty: 2, unit: "" },
+        { name: "Lemon juice", qty: 1, unit: "tbsp" },
+        { name: "Red pepper flakes", qty: 0, unit: "pinch" },
+        { name: "Everything bagel seasoning", qty: 0, unit: "to taste" },
+        { name: "Salt & pepper", qty: 0, unit: "to taste" },
+      ]),
+      steps: JSON.stringify([
+        "Soft boil eggs: bring water to boil, lower eggs in, cook exactly 6.5 minutes, transfer to ice water.",
+        "Toast bread to your liking.",
+        "Smash avocado with lemon juice, salt, and pepper.",
+        "Spread avocado on toast. Peel and halve eggs.",
+        "Top with eggs, red pepper flakes, and everything bagel seasoning.",
+      ]),
+      tags: JSON.stringify(["vegetarian", "breakfast", "healthy", "quick"]),
+      imageUrl: "https://images.unsplash.com/photo-1525351484163-7529414344d8?w=600&q=80",
+      contributorId: chef1.id,
+      sourceUrl: null,
+    });
+
+    storage.createRecipe({
+      name: "Pork Fried Rice",
+      description: "Restaurant-style fried rice with tender char siu-style pork, eggs, and vegetables. Made in one wok in minutes.",
+      cookTimeMinutes: 20,
+      servings: 4,
+      equipment: JSON.stringify(["stove"]),
+      ingredients: JSON.stringify([
+        { name: "Cooked rice (day-old)", qty: 4, unit: "cups" },
+        { name: "Pork tenderloin or leftover pork, diced", qty: 0.75, unit: "lb" },
+        { name: "Eggs", qty: 3, unit: "" },
+        { name: "Frozen peas and carrots", qty: 1, unit: "cup" },
+        { name: "Green onions", qty: 3, unit: "" },
+        { name: "Soy sauce", qty: 3, unit: "tbsp" },
+        { name: "Oyster sauce", qty: 1, unit: "tbsp" },
+        { name: "Sesame oil", qty: 1, unit: "tsp" },
+        { name: "Garlic cloves, minced", qty: 2, unit: "" },
+        { name: "Vegetable oil", qty: 2, unit: "tbsp" },
+      ]),
+      steps: JSON.stringify([
+        "Heat wok over highest heat. Add oil, sear pork until caramelized. Remove.",
+        "Add garlic and peas/carrots, stir fry 2 min.",
+        "Push to side, scramble eggs in the space until just set.",
+        "Add rice, breaking up clumps. Toss everything together 3-4 minutes.",
+        "Add soy sauce, oyster sauce, and sesame oil. Toss. Return pork.",
+        "Top with green onions. Serve immediately.",
+      ]),
+      tags: JSON.stringify(["asian", "quick", "pork", "meal-prep"]),
+      imageUrl: "https://images.unsplash.com/photo-1603133872878-684f208fb84b?w=600&q=80",
+      contributorId: chef3.id,
+      sourceUrl: null,
+    });
   }
 }
 
@@ -744,6 +1224,20 @@ export function registerRoutes(httpServer: Server, app: Express) {
     const ok = storage.deleteRecipe(id);
     if (!ok) return res.status(404).json({ error: "Recipe not found" });
     res.status(204).end();
+  });
+
+  // ── URL Recipe Import ────────────────────────────────────────────────────────
+  app.post("/api/recipes/import-url", async (req, res) => {
+    const parsed = z.object({ url: z.string().url() }).safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Please provide a valid URL" });
+    }
+    try {
+      const imported = await importRecipeFromUrl(parsed.data.url);
+      res.json(imported);
+    } catch (err: any) {
+      res.status(422).json({ error: err.message || "Failed to import recipe" });
+    }
   });
 
   // --- Schedule generation ---
@@ -846,13 +1340,14 @@ export function registerRoutes(httpServer: Server, app: Express) {
   app.post("/api/schedule/parallel", (req, res) => {
     const parsed = z.object({
       recipeIds: z.array(z.number()).min(2).max(5),
+      burners: z.number().min(1).max(6).optional().default(2),
     }).safeParse(req.body);
 
     if (!parsed.success) {
       return res.status(400).json({ error: "Provide 2–5 recipe IDs", details: parsed.error.flatten() });
     }
 
-    const { recipeIds } = parsed.data;
+    const { recipeIds, burners } = parsed.data;
     const allRecipes = storage.getRecipes();
     const selected = allRecipes.filter(r => recipeIds.includes(r.id));
 
@@ -869,9 +1364,10 @@ export function registerRoutes(httpServer: Server, app: Express) {
       steps: JSON.parse(r.steps || "[]") as string[],
     }));
 
-    const plan = buildParallelPlan(enriched);
-    const totalMinutes = plan.reduce((max, t) => Math.max(max, t.startMinute + t.durationMinutes), 0);
+    const phases = buildParallelPlan(enriched, burners);
+    const totalMinutes = enriched.reduce((max, r) => Math.max(max, r.cookTimeMinutes), 0);
+    const sequentialMinutes = enriched.reduce((sum, r) => sum + r.cookTimeMinutes, 0);
 
-    res.json({ plan, totalMinutes, recipeCount: selected.length });
+    res.json({ phases, totalMinutes, sequentialMinutes, recipeCount: selected.length });
   });
 }
