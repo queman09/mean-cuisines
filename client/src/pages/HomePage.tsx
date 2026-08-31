@@ -5,6 +5,7 @@
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -2010,6 +2011,22 @@ export default function HomePage() {
         )}
 
       </main>
+
+      <footer className="border-t border-border px-4 md:px-6 py-5 mt-auto">
+        <div className="text-center text-xs text-muted-foreground space-y-2">
+          <p>
+            <Link href="/privacy" className="text-primary hover:underline">Privacy</Link>
+            <span className="mx-2">·</span>
+            <Link href="/terms" className="text-primary hover:underline">Terms</Link>
+          </p>
+          <p className="text-muted-foreground/60">
+            Mean Cuisines is a participant in the Amazon Services LLC Associates Program, an
+            affiliate advertising program designed to provide a means for sites to earn advertising
+            fees by advertising and linking to Amazon.com and affiliated sites. As an Amazon
+            Associate, we earn from qualifying purchases.
+          </p>
+        </div>
+      </footer>
 
       <AddRecipeModal open={showAddModal} onClose={() => setShowAddModal(false)} contributors={contributors} />
     </div>
