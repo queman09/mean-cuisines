@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,6 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import PerplexityAttribution from "@/components/PerplexityAttribution";
 import {
   ChefHat, Clock, Plus, Menu, X,
   CalendarClock, Flame, Moon, Sun, UtensilsCrossed, Info,
@@ -785,11 +784,19 @@ export default function HomePage() {
 
         {/* Footer */}
         <footer className="border-t border-border px-4 md:px-6 py-5 mt-2">
-          <div className="text-center text-xs text-muted-foreground space-y-1">
+          <div className="text-center text-xs text-muted-foreground space-y-2">
             <p className="font-display font-semibold text-sm text-foreground">Mean Cuisines</p>
             <p>Cook Like a Machine. Eat Like a King.</p>
+            <p>
+              <Link href="/privacy" className="text-primary hover:underline">Privacy</Link>
+              <span className="mx-2">·</span>
+              <Link href="/terms" className="text-primary hover:underline">Terms</Link>
+            </p>
             <p className="text-muted-foreground/60">
-              Amazon affiliate disclosure: we earn a small commission on qualifying purchases at no extra cost to you.
+              Mean Cuisines is a participant in the Amazon Services LLC Associates Program, an
+              affiliate advertising program designed to provide a means for sites to earn advertising
+              fees by advertising and linking to Amazon.com and affiliated sites. As an Amazon
+              Associate, we earn from qualifying purchases.
             </p>
           </div>
         </footer>
