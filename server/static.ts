@@ -5,24 +5,15 @@ import path from "path";
 /**
  * Production static + SPA fallback.
  *
- * Why /sitemap.xml was not real XML (and can look like a 500 in Search Console):
- *   client/public/ currently has only favicon.svg. Vite copies that dir to dist/public.
- *   express.static therefore cannot find /sitemap.xml, /robots.txt, or /og-image.png.
- *   The catch-all then sendFile()s index.html with Content-Type: text/html.
- *   Live check 2026-08-31: GET /sitemap.xml → 200 text/html (the SPA), NOT application/xml.
- *   There is no sitemap route in server/routes.ts. Google/Bing treat an HTML "sitemap"
- *   as a fetch error; some auditors report that as HTTP 500 even though Express returned 200.
+ * Real files (robots, sitemap, og-image, llms.txt, markdown, openapi) live in
+ * client/public and are copied to dist/public by Vite. Explicit GET handlers set
+ * the right Content-Type. Dotted paths that are missing 404 as text/plain instead
+ * of returning the SPA HTML.
  *
- * Fix:
- *   1. Put robots.txt, sitemap.xml, og-image.png in client/public/ so Vite emits them
- *      into dist/public and express.static can serve them with the right MIME type
- *      BEFORE the SPA fallback.
- *   2. Explicit GET handlers below as belt-and-suspenders (correct Content-Type).
- *   3. Do NOT SPA-fallback dotted file paths (.xml/.txt/.png/…). Missing ones should
- *      404, not return HTML. /privacy and /terms have no file extension, so they still
- *      receive index.html and the React (wouter) routes render the pages.
+ * /privacy and /terms have no file extension, so they still receive index.html
+ * and the React (wouter) routes render the pages.
  *
- * Also set vite.config.ts `base: "/"` (not "./"). Relative base breaks JS/CSS on /privacy.
+ * vite.config.ts must keep `base: "/"` (not "."). Relative base breaks JS/CSS on /privacy.
  */
 export function serveStatic(app: Express) {
   const distPath = path.resolve(__dirname, "public");
@@ -45,6 +36,12 @@ export function serveStatic(app: Express) {
   app.get("/robots.txt", sendPublic("robots.txt", "text/plain; charset=utf-8"));
   app.get("/sitemap.xml", sendPublic("sitemap.xml", "application/xml; charset=utf-8"));
   app.get("/og-image.png", sendPublic("og-image.png", "image/png"));
+  app.get("/llms.txt", sendPublic("llms.txt", "text/markdown; charset=utf-8"));
+  app.get("/llms-full.txt", sendPublic("llms-full.txt", "text/markdown; charset=utf-8"));
+  app.get("/openapi.json", sendPublic("openapi.json", "application/json; charset=utf-8"));
+  app.get("/index.md", sendPublic("index.md", "text/markdown; charset=utf-8"));
+  app.get("/privacy.md", sendPublic("privacy.md", "text/markdown; charset=utf-8"));
+  app.get("/terms.md", sendPublic("terms.md", "text/markdown; charset=utf-8"));
 
   app.use(express.static(distPath, { index: false, fallthrough: true }));
 
@@ -57,7 +54,16 @@ export function serveStatic(app: Express) {
       return;
     }
 
-    // /privacy, /terms, /parallel, / → React.
+    const p = req.path.replace(/\/$/, "") || "/";
+    const links = ['</llms.txt>; rel="describedby"'];
+    if (p === "/privacy") {
+      links.push('</privacy.md>; rel="alternate"; type="text/markdown"');
+    } else if (p === "/terms") {
+      links.push('</terms.md>; rel="alternate"; type="text/markdown"');
+    } else {
+      links.push('</index.md>; rel="alternate"; type="text/markdown"');
+    }
+    res.setHeader("Link", links.join(", "));
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }

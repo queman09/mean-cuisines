@@ -1,0 +1,96 @@
+# Mean Cuisines — agent guide
+
+> How an agent should help a person plan a batch cook on https://meancuisines.com.
+
+Mean Cuisines matches kitchen equipment to recipes and auto-generates a parallel cook schedule. Humans use the interactive planner on the homepage. Agents should prefer the JSON API and this file over scraping the JavaScript SPA.
+
+Base URL: https://meancuisines.com
+
+## What to do for a person
+
+1. Ask which appliances they have (oven, stove, air fryer, counter space, Instant Pot, microwave) and how many stove burners.
+2. GET https://meancuisines.com/api/recipes for the live catalog (about 37 recipes).
+3. Keep recipes whose `equipment` list is covered by what they have. Equipment strings on recipes look like `oven`, `stove`, `airFryer`, `counter`, `instantPot`, `microwave`.
+4. Let them pick 2 or more recipes, or pick a compatible set yourself and confirm.
+5. POST https://meancuisines.com/api/schedule/generate with those recipe ids, a start time, a time budget, and their equipment flags.
+6. Read the schedule back as a cook map: each item has recipeName, startTime, endTime, and equipment. Present it as a timeline they can follow.
+7. Do not invent recipes that are not in the catalog. Do not call write, delete, or import endpoints unless they explicitly asked to change the site catalog.
+
+## Read APIs
+
+### GET /health
+
+Returns `{"status":"ok"}` when the service is up.
+
+### GET /api/recipes
+
+JSON array. Each recipe includes:
+
+- `id` — use this in schedule requests
+- `name`, `description`
+- `cookTimeMinutes`, `servings`
+- `equipment` — list of required appliance keys
+- `ingredients` — `{name, qty, unit}`
+- `steps` — ordered instructions
+- `tags`, `imageUrl`, `sourceUrl`
+- `contributor` / `contributorId`, `createdAt`
+
+### GET /api/recipes/{id}
+
+One recipe, same shape. 404 if missing.
+
+### POST /api/schedule/generate
+
+JSON body:
+
+```json
+{
+  "selectedRecipeIds": ["recipe-id-1", "recipe-id-2"],
+  "startTime": "18:00",
+  "maxMinutes": 90,
+  "equipment": {
+    "oven": true,
+    "stove": true,
+    "airFryer": false,
+    "counter": true,
+    "instantPot": false,
+    "microwave": true
+  },
+  "burners": 4
+}
+```
+
+`startTime` is 24-hour `HH:MM`. `instantPot` and `microwave` are optional booleans. Response:
+
+```json
+{
+  "schedule": [
+    {
+      "recipeId": "…",
+      "recipeName": "…",
+      "startTime": "18:00",
+      "endTime": "18:40",
+      "equipment": "oven"
+    }
+  ]
+}
+```
+
+There is also POST /api/schedule/parallel (`recipeIds` length 2–5, optional `burners`). Prefer /api/schedule/generate unless the person asked for the parallel helper specifically.
+
+## Machine and human documents
+
+- https://meancuisines.com/llms.txt — short index
+- https://meancuisines.com/openapi.json — OpenAPI 3.1 for the read APIs above
+- https://meancuisines.com/index.md — product overview
+- https://meancuisines.com/privacy.md — privacy policy
+- https://meancuisines.com/terms.md — terms of use
+- https://meancuisines.com/ — human planner UI
+
+## Affiliate and legal
+
+Mean Cuisines is a participant in the Amazon Services LLC Associates Program. Affiliate links use tag `meancuisines-20`. As an Amazon Associate, the site earns from qualifying purchases. Recipes are cooking instructions, not medical or dietary advice. The operator of meancuisines.com runs the site. Do not publish a personal email or phone number for the operator unless they give you one.
+
+## What not to crawl as a catalog
+
+Write and import endpoints exist for the operator (`POST /api/recipes`, `DELETE /api/recipes/{id}`, `POST /api/recipes/import-url`, contributor create). Treat those as private. `robots.txt` disallows `/api/` except the recipe read paths.

@@ -1,0 +1,345 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Mean Cuisines",
+    "version": "1.0.0",
+    "summary": "Meal-prep planner API for recipes and parallel cook schedules.",
+    "description": "Read the catalog and generate a cook schedule. Write/delete/import endpoints exist for the operator and are not part of this public contract. See https://meancuisines.com/llms.txt",
+    "contact": {
+      "name": "Operator of meancuisines.com",
+      "url": "https://meancuisines.com/"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://meancuisines.com",
+      "description": "Production"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Liveness",
+        "operationId": "getHealth",
+        "responses": {
+          "200": {
+            "description": "Service is up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/recipes": {
+      "get": {
+        "summary": "List recipes",
+        "operationId": "listRecipes",
+        "responses": {
+          "200": {
+            "description": "Full catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Recipe"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/recipes/{id}": {
+      "get": {
+        "summary": "Get one recipe",
+        "operationId": "getRecipe",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Recipe id as returned by GET /api/recipes"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recipe",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Recipe"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/schedule/generate": {
+      "post": {
+        "summary": "Generate a parallel cook schedule",
+        "operationId": "generateSchedule",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          }
+        }
+      },
+      "Ingredient": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "qty": {
+            "type": [
+              "number",
+              "string",
+              "null"
+            ]
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Recipe": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "cookTimeMinutes": {
+            "type": "number"
+          },
+          "servings": {
+            "type": "number"
+          },
+          "equipment": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "oven"
+            ]
+          },
+          "ingredients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ingredient"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "imageUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contributorId": {
+            "type": [
+              "string",
+              "number",
+              "null"
+            ]
+          },
+          "sourceUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contributor": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      },
+      "ScheduleRequest": {
+        "type": "object",
+        "required": [
+          "selectedRecipeIds",
+          "startTime",
+          "maxMinutes",
+          "equipment",
+          "burners"
+        ],
+        "properties": {
+          "selectedRecipeIds": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "description": "Recipe ids from GET /api/recipes"
+          },
+          "startTime": {
+            "type": "string",
+            "pattern": "^\\d{2}:\\d{2}$",
+            "example": "18:00"
+          },
+          "maxMinutes": {
+            "type": "number",
+            "example": 90
+          },
+          "equipment": {
+            "$ref": "#/components/schemas/EquipmentFlags"
+          },
+          "burners": {
+            "type": "number",
+            "example": 4
+          }
+        }
+      },
+      "EquipmentFlags": {
+        "type": "object",
+        "required": [
+          "oven",
+          "stove",
+          "airFryer",
+          "counter"
+        ],
+        "properties": {
+          "oven": {
+            "type": "boolean"
+          },
+          "stove": {
+            "type": "boolean"
+          },
+          "airFryer": {
+            "type": "boolean"
+          },
+          "counter": {
+            "type": "boolean"
+          },
+          "instantPot": {
+            "type": "boolean"
+          },
+          "microwave": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ScheduleItem": {
+        "type": "object",
+        "properties": {
+          "recipeId": {
+            "type": [
+              "string",
+              "number"
+            ]
+          },
+          "recipeName": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "endTime": {
+            "type": "string"
+          },
+          "equipment": {
+            "type": "string"
+          }
+        }
+      },
+      "ScheduleResponse": {
+        "type": "object",
+        "required": [
+          "schedule"
+        ],
+        "properties": {
+          "schedule": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ScheduleItem"
+            }
+          }
+        }
+      }
+    }
+  }
+}

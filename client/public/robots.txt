@@ -1,5 +1,14 @@
+# Mean Cuisines — humans and agents
 User-agent: *
 Allow: /
+Allow: /llms.txt
+Allow: /llms-full.txt
+Allow: /index.md
+Allow: /privacy.md
+Allow: /terms.md
+Allow: /openapi.json
+Allow: /api/recipes
+Allow: /api/recipes/
 Disallow: /api/
 
 Sitemap: https://meancuisines.com/sitemap.xml

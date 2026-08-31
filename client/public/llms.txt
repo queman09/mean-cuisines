@@ -1,0 +1,24 @@
+# Mean Cuisines
+
+> Mean Cuisines is a meal-prep planner: pick kitchen equipment, choose recipes that can cook together, and get a parallel cook schedule. Tagline: Cook Like a Machine, Eat Like a King.
+
+This file is for humans and agents. Use the JSON API for recipes and schedules. Use the markdown pages for readable copy. Do not POST, PUT, or DELETE unless the operator of meancuisines.com asked you to change catalog data.
+
+## For agents
+
+- [How to use Mean Cuisines as an agent](https://meancuisines.com/llms-full.txt): step-by-step: list recipes, filter by equipment, generate a cook schedule
+- [OpenAPI](https://meancuisines.com/openapi.json): machine-readable schema for GET /api/recipes, GET /api/recipes/{id}, POST /api/schedule/generate
+- [Recipe catalog (JSON)](https://meancuisines.com/api/recipes): live list of recipes with ingredients, steps, cook time, and required equipment
+- [Health](https://meancuisines.com/health): {"status":"ok"} when the app is up
+
+## For humans
+
+- [Home](https://meancuisines.com/): interactive planner
+- [Home (markdown)](https://meancuisines.com/index.md): same product, readable without JavaScript
+- [Privacy Policy](https://meancuisines.com/privacy.md): what the site processes, Amazon Associates, cookies
+- [Terms of Use](https://meancuisines.com/terms.md): how to use the planner and affiliate links
+
+## Optional
+
+- [Sitemap](https://meancuisines.com/sitemap.xml)
+- [Robots](https://meancuisines.com/robots.txt)

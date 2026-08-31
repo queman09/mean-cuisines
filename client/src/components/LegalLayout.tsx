@@ -50,6 +50,8 @@ export default function LegalLayout({
             <Link href="/privacy" className="text-primary hover:underline">Privacy</Link>
             <span className="mx-2">·</span>
             <Link href="/terms" className="text-primary hover:underline">Terms</Link>
+            <span className="mx-2">·</span>
+            <a href="/llms.txt" className="text-primary hover:underline">For agents</a>
           </p>
           <p className="text-muted-foreground/70">
             Mean Cuisines is a participant in the Amazon Services LLC Associates Program, an affiliate
