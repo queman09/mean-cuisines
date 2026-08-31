@@ -876,14 +876,14 @@ function StepRecipes({
                 data-testid={`recipe-card-${recipe.id}`}
               >
                 {/* Recipe image — Unsplash matched by recipe name */}
-                <div className="relative h-40 bg-muted overflow-hidden">
+                <div className="relative aspect-[3/2] bg-muted overflow-hidden">
                   <img
-                    src={getRecipeImageUrl(recipe.name, recipe.tags)}
+                    src={recipe.imageUrl || getRecipeImageUrl(recipe.name, recipe.tags)}
                     alt={recipe.name}
                     className="w-full h-full object-cover"
                     loading="lazy"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = "https://source.unsplash.com/400x300/?food,cooking";
+                      (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&h=800&q=80";
                     }}
                   />
                   {/* Selected overlay */}

@@ -5,6 +5,8 @@ import { insertRecipeSchema, insertContributorSchema } from "@shared/schema";
 import { z } from "zod";
 import { buildParallelPlan } from "./parallelEngine";
 import { importRecipeFromUrl } from "./recipeImporter";
+import { reconcileRecipeImages } from "./recipeImages";
+import type { InsertRecipe } from "@shared/schema";
 
 // Seed default data if empty
 function seedIfEmpty() {
@@ -1154,6 +1156,8 @@ function seedIfEmpty() {
 export function registerRoutes(httpServer: Server, app: Express) {
   // Seed default data
   seedIfEmpty();
+  // Swap catalog photos in-place (existing ids only; never wipe recipes)
+  reconcileRecipeImages();
 
   // --- Contributors ---
   app.get("/api/contributors", (_req, res) => {
@@ -1196,6 +1200,45 @@ export function registerRoutes(httpServer: Server, app: Express) {
       steps: JSON.parse(recipe.steps || "[]"),
       tags: JSON.parse(recipe.tags || "[]"),
       contributor,
+    });
+  });
+
+  app.patch("/api/recipes/:id", (req, res) => {
+    const id = parseInt(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+    const existing = storage.getRecipe(id);
+    if (!existing) return res.status(404).json({ error: "Recipe not found" });
+    const body = req.body || {};
+    const patch: Partial<InsertRecipe> = {};
+    if (typeof body.imageUrl === "string") patch.imageUrl = body.imageUrl;
+    if (typeof body.name === "string") patch.name = body.name;
+    if (typeof body.description === "string") patch.description = body.description;
+    if (typeof body.cookTimeMinutes === "number") patch.cookTimeMinutes = body.cookTimeMinutes;
+    if (typeof body.servings === "number") patch.servings = body.servings;
+    if (typeof body.sourceUrl === "string" || body.sourceUrl === null) patch.sourceUrl = body.sourceUrl;
+    if (body.equipment !== undefined) {
+      patch.equipment = typeof body.equipment === "object" ? JSON.stringify(body.equipment) : body.equipment;
+    }
+    if (body.ingredients !== undefined) {
+      patch.ingredients = typeof body.ingredients === "object" ? JSON.stringify(body.ingredients) : body.ingredients;
+    }
+    if (body.steps !== undefined) {
+      patch.steps = typeof body.steps === "object" ? JSON.stringify(body.steps) : body.steps;
+    }
+    if (body.tags !== undefined) {
+      patch.tags = typeof body.tags === "object" ? JSON.stringify(body.tags) : body.tags;
+    }
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ error: "Provide at least one field (e.g. imageUrl)" });
+    }
+    const recipe = storage.updateRecipe(id, patch);
+    if (!recipe) return res.status(404).json({ error: "Recipe not found" });
+    res.json({
+      ...recipe,
+      equipment: JSON.parse(recipe.equipment || "[]"),
+      ingredients: JSON.parse(recipe.ingredients || "[]"),
+      steps: JSON.parse(recipe.steps || "[]"),
+      tags: JSON.parse(recipe.tags || "[]"),
     });
   });
 
