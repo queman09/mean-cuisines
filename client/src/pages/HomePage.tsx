@@ -504,6 +504,34 @@ function pantryMatch(recipe: Recipe, pantry: string[]): number {
   return Math.round((matched.length / recipe.ingredients.length) * 100);
 }
 
+type DietFilter = "all" | "vegan" | "vegetarian";
+type DiffFilter = "all" | "quick" | "simple" | "medium" | "hard";
+
+function recipeDiet(recipe: Recipe): "vegan" | "vegetarian" | "omnivore" {
+  const tags = recipe.tags.map(x => x.toLowerCase());
+  if (tags.includes("vegan")) return "vegan";
+  if (tags.includes("vegetarian")) return "vegetarian";
+  return "omnivore";
+}
+
+function recipeDifficulty(recipe: Recipe): Exclude<DiffFilter, "all"> {
+  if (recipe.tags.some(x => x.toLowerCase() === "quick") || recipe.cookTimeMinutes <= 20) return "quick";
+  if (recipe.cookTimeMinutes <= 35) return "simple";
+  if (recipe.cookTimeMinutes <= 60) return "medium";
+  return "hard";
+}
+
+const CATEGORY_FILTERS = [
+  { id: "breakfast", label: "Breakfast", tags: ["breakfast"] },
+  { id: "soup", label: "Soup", tags: ["soup"] },
+  { id: "pasta", label: "Pasta", tags: ["pasta"] },
+  { id: "one-pan", label: "One-pan", tags: ["one-pan", "one-pot"] },
+  { id: "meal-prep", label: "Meal prep", tags: ["meal-prep"] },
+  { id: "dessert", label: "Dessert", tags: ["dessert", "sweet"] },
+  { id: "salad", label: "Salad", tags: ["salad"] },
+  { id: "seafood", label: "Seafood", tags: ["seafood"] },
+] as const;
+
 // ─── Step Indicator ────────────────────────────────────────────────────────────
 
 function StepBar({ step, total }: { step: number; total: number }) {
@@ -774,28 +802,57 @@ function StepRecipes({
 }) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "compatible" | "pantry">("compatible");
+  const [diet, setDiet] = useState<DietFilter>("all");
+  const [difficulty, setDifficulty] = useState<DiffFilter>("all");
+  const [creatorId, setCreatorId] = useState<"all" | number>("all");
+  const [category, setCategory] = useState<string>("all");
 
   const compatible = useMemo(() =>
     recipes.filter(r => r.equipment.length === 0 || r.equipment.every(eq => equipment[eq])),
     [recipes, equipment]
   );
 
-  const scored = useMemo(() =>
-    compatible.map(r => ({ ...r, match: pantryMatch(r, pantry) }))
-      .sort((a, b) => b.match - a.match),
-    [compatible, pantry]
-  );
+  const scored = useMemo(() => {
+    const pool = filter === "all" ? recipes : compatible;
+    return pool.map(r => ({ ...r, match: pantryMatch(r, pantry) }))
+      .sort((a, b) => b.match - a.match);
+  }, [recipes, compatible, pantry, filter]);
+
+  const creatorOptions = useMemo(() => {
+    const seen = new Map<number, string>();
+    for (const r of recipes) {
+      if (r.contributor) seen.set(r.contributor.id, r.contributor.name);
+    }
+    return [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [recipes]);
 
   const displayed = useMemo(() => {
     let list = scored;
-    if (filter === "compatible") list = scored;
     if (filter === "pantry") list = scored.filter(r => r.match > 0);
+    if (diet === "vegan") list = list.filter(r => recipeDiet(r) === "vegan");
+    if (diet === "vegetarian") list = list.filter(r => {
+      const d = recipeDiet(r);
+      return d === "vegan" || d === "vegetarian";
+    });
+    if (difficulty !== "all") list = list.filter(r => recipeDifficulty(r) === difficulty);
+    if (creatorId !== "all") list = list.filter(r => r.contributor?.id === creatorId);
+    if (category !== "all") {
+      const spec = CATEGORY_FILTERS.find(c => c.id === category);
+      if (spec) {
+        const tags = spec.tags as readonly string[];
+        list = list.filter(r => r.tags.some(x => tags.includes(x.toLowerCase())));
+      }
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
-      list = list.filter(r => r.name.toLowerCase().includes(q) || r.tags.some(t => t.toLowerCase().includes(q)));
+      list = list.filter(r =>
+        r.name.toLowerCase().includes(q) ||
+        r.tags.some(x => x.toLowerCase().includes(q)) ||
+        (r.contributor?.name.toLowerCase().includes(q) ?? false)
+      );
     }
     return list;
-  }, [scored, filter, search]);
+  }, [scored, filter, diet, difficulty, creatorId, category, search]);
 
   const canCook = selectedIds.length >= 2;
 
@@ -813,8 +870,8 @@ function StepRecipes({
         </Button>
       </div>
 
-      {/* Search + filter */}
-      <div className="flex gap-2 mb-4 flex-wrap">
+      {/* Search + match */}
+      <div className="flex gap-2 mb-3 flex-wrap">
         <div className="relative flex-1 min-w-[180px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search recipes…" className="pl-8 h-9 text-sm" />
@@ -825,6 +882,54 @@ function StepRecipes({
               className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize transition-colors ${filter === f ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
             >{f === "compatible" ? "✓ Compatible" : f === "pantry" ? "🥬 Pantry match" : "All"}</button>
           ))}
+        </div>
+      </div>
+
+      {/* Diet, difficulty, creator, category */}
+      <div className="flex gap-2 mb-4 flex-wrap items-center">
+        <Select value={diet} onValueChange={(v) => setDiet(v as DietFilter)}>
+          <SelectTrigger className="h-9 w-[140px] text-xs" data-testid="filter-diet">
+            <SelectValue placeholder="Diet" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All diets</SelectItem>
+            <SelectItem value="vegan">Vegan</SelectItem>
+            <SelectItem value="vegetarian">Vegetarian</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={difficulty} onValueChange={(v) => setDifficulty(v as DiffFilter)}>
+          <SelectTrigger className="h-9 w-[150px] text-xs" data-testid="filter-difficulty">
+            <SelectValue placeholder="Difficulty" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Any difficulty</SelectItem>
+            <SelectItem value="quick">Quick (≤20m)</SelectItem>
+            <SelectItem value="simple">Simple</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="hard">Hard</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={creatorId === "all" ? "all" : String(creatorId)} onValueChange={(v) => setCreatorId(v === "all" ? "all" : Number(v))}>
+          <SelectTrigger className="h-9 w-[160px] text-xs" data-testid="filter-creator">
+            <SelectValue placeholder="Creator" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All creators</SelectItem>
+            {creatorOptions.map(([id, name]) => (
+              <SelectItem key={id} value={String(id)}>{name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex gap-1 flex-wrap">
+          {CATEGORY_FILTERS.map(c => {
+            const on = category === c.id;
+            return (
+              <button key={c.id} type="button" onClick={() => setCategory(on ? "all" : c.id)}
+                data-testid={`filter-cat-${c.id}`}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${on ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+              >{c.label}</button>
+            );
+          })}
         </div>
       </div>
 
@@ -916,9 +1021,15 @@ function StepRecipes({
                   <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground flex-wrap">
                     <span className="flex items-center gap-1"><Clock size={11} />{fmtMins(recipe.cookTimeMinutes)}</span>
                     <span>·</span>
-                    <span>{recipe.equipment.map(e => EQUIPMENT_INFO[e]?.icon ?? e).join(" ")}</span>
-                    {recipe.tags.slice(0, 2).map(t => (
-                      <span key={t} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">{t}</span>
+                    <span className="capitalize">{recipeDifficulty(recipe)}</span>
+                    {recipe.contributor?.name && (
+                      <>
+                        <span>·</span>
+                        <span>{recipe.contributor.name}</span>
+                      </>
+                    )}
+                    {recipe.tags.slice(0, 2).map(tag => (
+                      <span key={tag} className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">{tag}</span>
                     ))}
                   </div>
 
