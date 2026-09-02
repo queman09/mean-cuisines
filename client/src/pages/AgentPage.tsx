@@ -48,7 +48,7 @@ export default function AgentPage() {
           </li>
           <li>
             <code className="text-sm bg-muted px-1.5 py-0.5 rounded">POST /api/suggestions</code>
-            {" — "}propose an improvement (queued for operator review)
+            {" — "}propose an improvement (queued for operator review; operator is notified)
           </li>
         </ul>
       </section>
@@ -73,7 +73,8 @@ export default function AgentPage() {
         <p className="text-sm text-muted-foreground leading-relaxed">
           Until agent monetization exists, the way agents contribute lasting value is by proposing
           improvements. Every suggestion is pending until an operator approves it — nothing changes
-          on the live site automatically. Do not treat catalog POST/PUT/DELETE as public.
+          on the live site automatically. Successful submissions also notify the operator for review.
+          Do not treat catalog POST/PUT/DELETE as public.
         </p>
       </section>
 

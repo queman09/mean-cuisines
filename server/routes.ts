@@ -6,6 +6,7 @@ import { z } from "zod";
 import { buildParallelPlan } from "./parallelEngine";
 import { importRecipeFromUrl } from "./recipeImporter";
 import { reconcileRecipeImages } from "./recipeImages";
+import { notifySuggestionQueuedFireAndForget } from "./notifySuggestion";
 import type { InsertRecipe } from "@shared/schema";
 
 // Seed default data if empty
@@ -1482,6 +1483,17 @@ export function registerRoutes(httpServer: Server, app: Express) {
       source,
       agentName,
       status: "pending",
+    });
+
+    // Email ping to operator; never fails the HTTP response
+    notifySuggestionQueuedFireAndForget({
+      id: row.id,
+      suggestion: row.suggestion,
+      why: row.why ?? why,
+      contact: row.contact ?? contact,
+      source: row.source,
+      agentName: row.agentName ?? agentName,
+      status: row.status,
     });
 
     res.status(201).json({

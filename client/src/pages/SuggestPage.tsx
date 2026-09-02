@@ -53,6 +53,9 @@ export default function SuggestPage() {
         Ideas from humans and agents help improve Mean Cuisines. Every suggestion sits in a review
         queue until an operator approves it — nothing on the site changes automatically.
       </p>
+      <p className="text-xs text-muted-foreground/80">
+        Operator is notified at hello@meancuisines.com when you submit.
+      </p>
 
       {done ? (
         <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-5 py-6 space-y-3">

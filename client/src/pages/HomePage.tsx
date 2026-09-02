@@ -2016,6 +2016,22 @@ export default function HomePage() {
   const [burners, setBurners] = useState(2);
   const [parallelPlan, setParallelPlan] = useState<ParallelPlan | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [suggestHintVisible, setSuggestHintVisible] = useState(() => {
+    try {
+      return sessionStorage.getItem("mc_suggest_hint_dismissed") !== "1";
+    } catch {
+      return true;
+    }
+  });
+
+  const dismissSuggestHint = () => {
+    setSuggestHintVisible(false);
+    try {
+      sessionStorage.setItem("mc_suggest_hint_dismissed", "1");
+    } catch {
+      /* ignore */
+    }
+  };
 
   const { data: recipes = [], isLoading } = useQuery<Recipe[]>({ queryKey: ["/api/recipes"] });
   const { data: contributors = [] } = useQuery<Contributor[]>({ queryKey: ["/api/contributors"] });
@@ -2064,6 +2080,13 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              href="/suggest"
+              className="text-xs text-muted-foreground hover:text-primary transition-colors px-1"
+              title="Suggest an improvement"
+            >
+              Suggest
+            </Link>
             <Link
               href="/agents"
               className="text-xs text-muted-foreground hover:text-primary transition-colors px-1"
@@ -2137,7 +2160,7 @@ export default function HomePage() {
             <span className="mx-2">·</span>
             <Link href="/terms" className="text-primary hover:underline">Terms</Link>
             <span className="mx-2">·</span>
-            <Link href="/suggest" className="text-primary hover:underline">Suggest</Link>
+            <Link href="/suggest" className="text-primary hover:underline">Suggest an idea</Link>
             <span className="mx-2">·</span>
             <Link href="/agents" className="text-primary hover:underline">For agents</Link>
           </p>
@@ -2149,6 +2172,30 @@ export default function HomePage() {
           </p>
         </div>
       </footer>
+
+      {suggestHintVisible && (
+        <div
+          className="fixed bottom-0 inset-x-0 z-40 pointer-events-none pb-[max(0.75rem,env(safe-area-inset-bottom))] px-3"
+          role="status"
+        >
+          <div className="pointer-events-auto mx-auto max-w-md flex items-center gap-2 rounded-lg border border-border bg-background/95 backdrop-blur shadow-sm px-3 py-2 text-xs text-muted-foreground">
+            <span className="flex-1 leading-snug">
+              Got an idea to improve Mean Cuisines?{" "}
+              <Link href="/suggest" className="text-primary hover:underline font-medium" onClick={dismissSuggestHint}>
+                Suggest
+              </Link>
+            </span>
+            <button
+              type="button"
+              onClick={dismissSuggestHint}
+              className="shrink-0 p-1 rounded hover:bg-accent text-muted-foreground"
+              aria-label="Dismiss suggestion hint"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
 
       <AddRecipeModal open={showAddModal} onClose={() => setShowAddModal(false)} contributors={contributors} />
     </div>
