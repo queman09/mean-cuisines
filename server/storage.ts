@@ -1,6 +1,6 @@
 import { db } from "./db";
-import { contributors, recipes, scheduleSlots } from "@shared/schema";
-import type { Contributor, InsertContributor, Recipe, InsertRecipe, ScheduleSlot, InsertScheduleSlot } from "@shared/schema";
+import { contributors, recipes, scheduleSlots, suggestions } from "@shared/schema";
+import type { Contributor, InsertContributor, Recipe, InsertRecipe, ScheduleSlot, InsertScheduleSlot, Suggestion, InsertSuggestion } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 export interface IStorage {
@@ -22,6 +22,11 @@ export interface IStorage {
   createScheduleSlot(data: InsertScheduleSlot): ScheduleSlot;
   deleteAllScheduleSlots(): void;
   replaceScheduleSlots(slots: InsertScheduleSlot[]): ScheduleSlot[];
+
+  // Suggestions
+  createSuggestion(data: InsertSuggestion): Suggestion;
+  getSuggestions(status?: string): Suggestion[];
+  updateSuggestionStatus(id: number, status: string): Suggestion | undefined;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -79,6 +84,26 @@ export class DatabaseStorage implements IStorage {
     db.delete(scheduleSlots).run();
     if (slots.length === 0) return [];
     return db.insert(scheduleSlots).values(slots).returning().all();
+  }
+
+  createSuggestion(data: InsertSuggestion): Suggestion {
+    return db.insert(suggestions).values(data).returning().get();
+  }
+
+  getSuggestions(status?: string): Suggestion[] {
+    if (status) {
+      return db.select().from(suggestions).where(eq(suggestions.status, status)).all();
+    }
+    return db.select().from(suggestions).all();
+  }
+
+  updateSuggestionStatus(id: number, status: string): Suggestion | undefined {
+    return db
+      .update(suggestions)
+      .set({ status, reviewedAt: new Date().toISOString() })
+      .where(eq(suggestions.id, id))
+      .returning()
+      .get();
   }
 }
 

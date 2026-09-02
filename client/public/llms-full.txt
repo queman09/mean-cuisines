@@ -14,7 +14,8 @@ Base URL: https://meancuisines.com
 4. Let them pick 2 or more recipes, or pick a compatible set yourself and confirm.
 5. POST https://meancuisines.com/api/schedule/generate with those recipe ids, a start time, a time budget, and their equipment flags.
 6. Read the schedule back as a cook map: each item has recipeName, startTime, endTime, and equipment. Present it as a timeline they can follow.
-7. Do not invent recipes that are not in the catalog. Do not call write, delete, or import endpoints unless they explicitly asked to change the site catalog.
+7. Do not invent recipes that are not in the catalog. Do not call catalog write, delete, or import endpoints unless they explicitly asked to change the site catalog.
+8. To propose product improvements (feature ideas, UX gaps, doc fixes), POST /api/suggestions. Suggestions are the knowledge currency until agent monetization; every item is pending until an operator approves it.
 
 ## Read APIs
 
@@ -78,10 +79,49 @@ JSON body:
 
 There is also POST /api/schedule/parallel (`recipeIds` length 2–5, optional `burners`). Prefer /api/schedule/generate unless the person asked for the parallel helper specifically.
 
+
+## Suggestions (public write — review queue only)
+
+### POST /api/suggestions
+
+Propose an improvement. This does **not** change the recipe catalog. The body is stored with `status: "pending"` until an operator reviews it.
+
+```json
+{
+  "suggestion": "Add a vegetarian-only filter chip that stays sticky across sessions",
+  "why": "Users who cook plant-based meals re-select every visit",
+  "source": "agent",
+  "agentName": "example-agent",
+  "contact": "optional-handle@example.com"
+}
+```
+
+- `suggestion` (required, 1–4000 chars)
+- `why` (optional, max 2000)
+- `contact` (optional, max 200)
+- `source` — `human` or `agent`; if omitted, defaults to `agent`
+- `agentName` (optional, max 120)
+
+Response `201`:
+
+```json
+{
+  "id": 42,
+  "status": "pending",
+  "message": "Queued for operator review. Nothing changes until approved."
+}
+```
+
+Rate limit: roughly 5 submissions per IP per 10 minutes. Admin list/update endpoints exist for the operator and are not part of the public contract.
+
+Humans can also use https://meancuisines.com/suggest. Agents should prefer this API and https://meancuisines.com/agents.
+
 ## Machine and human documents
 
 - https://meancuisines.com/llms.txt — short index
-- https://meancuisines.com/openapi.json — OpenAPI 3.1 for the read APIs above
+- https://meancuisines.com/openapi.json — OpenAPI 3.1 for recipes, schedule, and suggestions
+- https://meancuisines.com/agents — stripped agent portal
+- https://meancuisines.com/suggest — human suggestion form
 - https://meancuisines.com/index.md — product overview
 - https://meancuisines.com/privacy.md — privacy policy
 - https://meancuisines.com/terms.md — terms of use
@@ -93,4 +133,4 @@ Mean Cuisines is a participant in the Amazon Services LLC Associates Program. Af
 
 ## What not to crawl as a catalog
 
-Write and import endpoints exist for the operator (`POST /api/recipes`, `DELETE /api/recipes/{id}`, `POST /api/recipes/import-url`, contributor create). Treat those as private. `robots.txt` disallows `/api/` except the recipe read paths.
+Write and import endpoints exist for the operator (`POST /api/recipes`, `DELETE /api/recipes/{id}`, `POST /api/recipes/import-url`, contributor create). Treat those as private. `POST /api/suggestions` is the public exception for proposing improvements — still not a catalog write. `robots.txt` disallows `/api/` except the recipe read paths.

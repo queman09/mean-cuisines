@@ -2064,6 +2064,13 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              href="/agents"
+              className="text-xs text-muted-foreground hover:text-primary transition-colors px-1"
+              title="Stripped-back view for AI agents"
+            >
+              Agents
+            </Link>
             <button onClick={() => setDarkMode(d => !d)} className="p-2 rounded-lg hover:bg-accent transition-colors text-muted-foreground" aria-label="Toggle dark mode">
               {darkMode ? <Sun size={16} /> : <Moon size={16} />}
             </button>
@@ -2130,7 +2137,9 @@ export default function HomePage() {
             <span className="mx-2">·</span>
             <Link href="/terms" className="text-primary hover:underline">Terms</Link>
             <span className="mx-2">·</span>
-            <a href="/llms.txt" className="text-primary hover:underline">For agents</a>
+            <Link href="/suggest" className="text-primary hover:underline">Suggest</Link>
+            <span className="mx-2">·</span>
+            <Link href="/agents" className="text-primary hover:underline">For agents</Link>
           </p>
           <p className="text-muted-foreground/60">
             Mean Cuisines is a participant in the Amazon Services LLC Associates Program, an

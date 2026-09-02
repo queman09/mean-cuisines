@@ -57,3 +57,24 @@ export const scheduleSlots = sqliteTable("schedule_slots", {
 export const insertScheduleSlotSchema = createInsertSchema(scheduleSlots).omit({ id: true });
 export type InsertScheduleSlot = z.infer<typeof insertScheduleSlotSchema>;
 export type ScheduleSlot = typeof scheduleSlots.$inferSelect;
+
+// Suggestion inbox (humans + agents; pending operator approval)
+export const suggestions = sqliteTable("suggestions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  suggestion: text("suggestion").notNull(),
+  why: text("why").default(""),
+  contact: text("contact"),
+  source: text("source").notNull().default("human"), // "human" | "agent"
+  agentName: text("agent_name"),
+  status: text("status").notNull().default("pending"), // pending | approved | rejected | parked
+  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+  reviewedAt: text("reviewed_at"),
+});
+
+export const insertSuggestionSchema = createInsertSchema(suggestions)
+  .omit({ id: true, createdAt: true, reviewedAt: true })
+  .extend({
+    status: z.enum(["pending", "approved", "rejected", "parked"]).optional().default("pending"),
+  });
+export type InsertSuggestion = z.infer<typeof insertSuggestionSchema>;
+export type Suggestion = typeof suggestions.$inferSelect;

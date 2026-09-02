@@ -1413,4 +1413,102 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
     res.json({ phases, totalMinutes, sequentialMinutes, recipeCount: selected.length });
   });
+
+  // --- Suggestions inbox (humans + agents; pending operator approval) ---
+  const suggestionBodySchema = z.object({
+    suggestion: z.string().min(1).max(4000),
+    why: z.string().max(2000).optional(),
+    contact: z.string().max(200).optional(),
+    source: z.enum(["human", "agent"]).optional(),
+    agentName: z.string().max(120).optional(),
+  });
+
+  // Simple in-memory rate limit: max 5 POSTs per IP per 10 minutes
+  const suggestionRateLimit = new Map<string, number[]>();
+  const SUGGEST_WINDOW_MS = 10 * 60 * 1000;
+  const SUGGEST_MAX = 5;
+
+  function checkSuggestionRateLimit(ip: string): boolean {
+    const now = Date.now();
+    const prev = (suggestionRateLimit.get(ip) || []).filter(t => now - t < SUGGEST_WINDOW_MS);
+    if (prev.length >= SUGGEST_MAX) {
+      suggestionRateLimit.set(ip, prev);
+      return false;
+    }
+    prev.push(now);
+    suggestionRateLimit.set(ip, prev);
+    return true;
+  }
+
+  function requireOperatorToken(req: { header: (n: string) => string | undefined }, res: { status: (c: number) => { json: (b: unknown) => void } }): boolean {
+    const token = process.env.SUGGESTIONS_ADMIN_TOKEN;
+    if (!token) {
+      res.status(503).json({ error: "Operator review not configured" });
+      return false;
+    }
+    if (req.header("X-Operator-Token") !== token) {
+      res.status(401).json({ error: "Unauthorized" });
+      return false;
+    }
+    return true;
+  }
+
+  app.post("/api/suggestions", (req, res) => {
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
+      || req.socket.remoteAddress
+      || "unknown";
+    if (!checkSuggestionRateLimit(ip)) {
+      return res.status(429).json({ error: "Too many suggestions. Try again in a few minutes." });
+    }
+
+    const parsed = suggestionBodySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+
+    const suggestion = parsed.data.suggestion.trim();
+    const why = (parsed.data.why ?? "").trim();
+    const contact = parsed.data.contact?.trim() || null;
+    const agentName = parsed.data.agentName?.trim() || null;
+    // Form sends source:"human"; agents default to agent when omitted
+    const source = parsed.data.source ?? "agent";
+
+    if (!suggestion) {
+      return res.status(400).json({ error: "Suggestion cannot be empty" });
+    }
+
+    const row = storage.createSuggestion({
+      suggestion,
+      why,
+      contact,
+      source,
+      agentName,
+      status: "pending",
+    });
+
+    res.status(201).json({
+      id: row.id,
+      status: "pending",
+      message: "Queued for operator review. Nothing changes until approved.",
+    });
+  });
+
+  app.get("/api/suggestions", (req, res) => {
+    if (!requireOperatorToken(req, res)) return;
+    const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    res.json(storage.getSuggestions(status));
+  });
+
+  app.patch("/api/suggestions/:id", (req, res) => {
+    if (!requireOperatorToken(req, res)) return;
+    const id = parseInt(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const body = z.object({
+      status: z.enum(["approved", "rejected", "parked"]),
+    }).safeParse(req.body);
+    if (!body.success) return res.status(400).json({ error: body.error.flatten() });
+
+    const updated = storage.updateSuggestionStatus(id, body.data.status);
+    if (!updated) return res.status(404).json({ error: "Suggestion not found" });
+    res.json(updated);
+  });
 }

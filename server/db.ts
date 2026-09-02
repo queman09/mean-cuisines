@@ -39,6 +39,18 @@ sqlite.exec(`
     end_time TEXT NOT NULL,
     equipment TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    suggestion TEXT NOT NULL,
+    why TEXT DEFAULT '',
+    contact TEXT,
+    source TEXT NOT NULL DEFAULT 'human',
+    agent_name TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at TEXT
+  );
 `);
 
 export const db = drizzle(sqlite, { schema });

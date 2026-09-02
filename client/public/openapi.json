@@ -4,7 +4,7 @@
     "title": "Mean Cuisines",
     "version": "1.0.0",
     "summary": "Meal-prep planner API for recipes and parallel cook schedules.",
-    "description": "Read the catalog and generate a cook schedule. Write/delete/import endpoints exist for the operator and are not part of this public contract. See https://meancuisines.com/llms.txt",
+    "description": "Read the catalog, generate a cook schedule, and POST suggestions for operator review. Catalog write/delete/import endpoints exist for the operator and are not part of this public contract. See https://meancuisines.com/llms.txt",
     "contact": {
       "name": "Operator of meancuisines.com",
       "url": "https://meancuisines.com/"
@@ -115,6 +115,41 @@
           },
           "400": {
             "description": "Invalid body"
+          }
+        }
+      }
+    },
+    "/api/suggestions": {
+      "post": {
+        "summary": "Propose an improvement (review queue)",
+        "description": "Queues a suggestion for operator review. Does not change the recipe catalog.",
+        "operationId": "createSuggestion",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuggestionQueued"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body"
+          },
+          "429": {
+            "description": "Rate limited"
           }
         }
       }
@@ -337,6 +372,59 @@
             "items": {
               "$ref": "#/components/schemas/ScheduleItem"
             }
+          }
+        }
+      },
+      "SuggestionRequest": {
+        "type": "object",
+        "required": [
+          "suggestion"
+        ],
+        "properties": {
+          "suggestion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "why": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "contact": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "human",
+              "agent"
+            ],
+            "default": "agent"
+          },
+          "agentName": {
+            "type": "string",
+            "maxLength": 120
+          }
+        }
+      },
+      "SuggestionQueued": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "message"
+        ],
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string",
+            "example": "pending"
+          },
+          "message": {
+            "type": "string"
           }
         }
       }

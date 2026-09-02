@@ -5,6 +5,8 @@ import { Toaster } from "@/components/ui/toaster";
 import HomePage from "@/pages/HomePage";
 import PrivacyPage from "@/pages/PrivacyPage";
 import TermsPage from "@/pages/TermsPage";
+import SuggestPage from "@/pages/SuggestPage";
+import AgentPage from "@/pages/AgentPage";
 import NotFound from "@/pages/not-found";
 
 function AppRouter() {
@@ -15,6 +17,8 @@ function AppRouter() {
       <Route path="/" component={HomePage} />
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/terms" component={TermsPage} />
+      <Route path="/suggest" component={SuggestPage} />
+      <Route path="/agents" component={AgentPage} />
       <Route component={NotFound} />
     </Switch>
   );
