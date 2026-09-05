@@ -8,6 +8,7 @@ import { importRecipeFromUrl } from "./recipeImporter";
 import { reconcileRecipeImages } from "./recipeImages";
 import { notifySuggestionQueuedFireAndForget } from "./notifySuggestion";
 import type { InsertRecipe } from "@shared/schema";
+import { createHash } from "crypto";
 
 // Seed default data if empty
 function seedIfEmpty() {
@@ -1522,5 +1523,57 @@ export function registerRoutes(httpServer: Server, app: Express) {
     const updated = storage.updateSuggestionStatus(id, body.data.status);
     if (!updated) return res.status(404).json({ error: "Suggestion not found" });
     res.json(updated);
+  });
+
+  // --- Unique visitor beacon (salted IP hash; never store raw IP) ---
+  const VISIT_SALT = process.env.VISIT_SALT || "mean-cuisines-visit-salt-v1";
+
+  function clientIp(req: { ip?: string; headers: Record<string, unknown>; socket?: { remoteAddress?: string } }): string {
+    const xf = req.headers["x-forwarded-for"];
+    if (typeof xf === "string" && xf.trim()) return xf.split(",")[0].trim();
+    if (Array.isArray(xf) && xf[0]) return String(xf[0]).split(",")[0].trim();
+    return req.ip || req.socket?.remoteAddress || "unknown";
+  }
+
+  function hashIp(ip: string): string {
+    return createHash("sha256").update(`${VISIT_SALT}:${ip}`).digest("hex");
+  }
+
+  function utcDay(d = new Date()): string {
+    return d.toISOString().slice(0, 10);
+  }
+
+  function resolveStatsDay(raw: unknown): string {
+    if (raw === undefined || raw === null || raw === "" || raw === "today") return utcDay();
+    if (typeof raw === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+    return utcDay();
+  }
+
+  // Beacon: HomePage (and others) call once per load
+  app.get("/api/visit", (req, res) => {
+    const day = utcDay();
+    const ipHash = hashIp(clientIp(req as any));
+    const path = typeof req.query.path === "string" && req.query.path.startsWith("/")
+      ? req.query.path.slice(0, 200)
+      : "/";
+    try {
+      storage.recordVisit({ day, ipHash, path });
+    } catch (err) {
+      console.error("visit record failed:", err);
+    }
+    res.status(204).end();
+  });
+
+  // Public operator/agent metrics — no PII
+  app.get("/api/stats/visitors", (req, res) => {
+    const day = resolveStatsDay(req.query.day);
+    const { uniqueVisitors, hits } = storage.getVisitorStats(day);
+    res.json({
+      day,
+      uniqueToday: uniqueVisitors,
+      hitsToday: hits,
+      uniqueVisitors,
+      hits,
+    });
   });
 }

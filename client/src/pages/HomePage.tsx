@@ -2005,6 +2005,13 @@ export default function HomePage() {
   const [darkMode, setDarkMode] = useState(window.matchMedia("(prefers-color-scheme: dark)").matches);
   useEffect(() => { document.documentElement.classList.toggle("dark", darkMode); }, [darkMode]);
 
+  // Unique-visitor beacon (once per load; server hashes IP)
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetch("/api/visit?path=/", { signal: ctrl.signal, credentials: "omit" }).catch(() => {});
+    return () => ctrl.abort();
+  }, []);
+
   // Wizard state
   const [step, setStep] = useState<AppStep>(1);
   const [equipment, setEquipment] = useState<Record<EquipmentKey, boolean>>({

@@ -6,11 +6,12 @@ This file is for humans and agents. Use the JSON API for recipes and schedules. 
 
 ## For agents
 
-- [Agent portal](https://meancuisines.com/agents): stripped-back human-readable agent page
+- [Agent interface](https://meancuisines.com/agents): machine-oriented terminal/docs dump (not a consumer UI)
 - [How to use Mean Cuisines as an agent](https://meancuisines.com/llms-full.txt): step-by-step: list recipes, filter by equipment, generate a cook schedule, submit suggestions
 - [OpenAPI](https://meancuisines.com/openapi.json): machine-readable schema for GET /api/recipes, GET /api/recipes/{id}, POST /api/schedule/generate, POST /api/suggestions
 - [Recipe catalog (JSON)](https://meancuisines.com/api/recipes): live list of recipes with ingredients, steps, cook time, and required equipment
 - [Suggest an improvement](https://meancuisines.com/api/suggestions): POST JSON `{ "suggestion": "…", "why": "…", "source": "agent", "agentName": "…" }` — queued for operator review (not a catalog write)
+- [Visitor stats](https://meancuisines.com/api/stats/visitors?day=today): optional operator metrics `{ uniqueToday, hitsToday, day }` — unique visitors via salted IP hash, no raw IPs stored
 - [Health](https://meancuisines.com/health): {"status":"ok"} when the app is up
 
 ## For humans

@@ -78,3 +78,16 @@ export const insertSuggestionSchema = createInsertSchema(suggestions)
   });
 export type InsertSuggestion = z.infer<typeof insertSuggestionSchema>;
 export type Suggestion = typeof suggestions.$inferSelect;
+
+// Unique-visitor beacon (hashed IP only — never store raw IP)
+export const visits = sqliteTable("visits", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  day: text("day").notNull(), // YYYY-MM-DD (UTC)
+  ipHash: text("ip_hash").notNull(),
+  path: text("path").notNull().default("/"),
+  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+});
+
+export const insertVisitSchema = createInsertSchema(visits).omit({ id: true, createdAt: true });
+export type InsertVisit = z.infer<typeof insertVisitSchema>;
+export type Visit = typeof visits.$inferSelect;

@@ -1,92 +1,148 @@
 import { useEffect } from "react";
 import { Link } from "wouter";
-import LegalLayout from "@/components/LegalLayout";
 
+/**
+ * Machine-facing /agents surface — terminal/docs dump, not a consumer page.
+ */
 export default function AgentPage() {
   useEffect(() => {
-    document.title = "For agents — Mean Cuisines";
+    document.title = "Mean Cuisines — agent interface";
   }, []);
 
   return (
-    <LegalLayout title="Agent portal">
-      <p className="text-lg text-muted-foreground leading-relaxed">
-        A stripped-back view of Mean Cuisines for AI agents and automated helpers. Prefer these
-        links and the JSON API over scraping the interactive planner.
-      </p>
-
-      <section className="space-y-3">
-        <h2 className="font-display font-bold text-xl">What Mean Cuisines is</h2>
-        <p>
-          Mean Cuisines is a meal-prep planner: match kitchen equipment to recipes, pick a set that
-          can cook together, and get a parallel cook schedule. Tagline:{" "}
-          <em>Cook Like a Machine, Eat Like a King.</em>
-        </p>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="font-display font-bold text-xl">Links for agents</h2>
-        <ul className="list-disc pl-5 space-y-2">
-          <li>
-            <a href="/llms.txt" className="text-primary hover:underline font-medium">/llms.txt</a>
-            {" — "}short index of agent docs
-          </li>
-          <li>
-            <a href="/llms-full.txt" className="text-primary hover:underline font-medium">/llms-full.txt</a>
-            {" — "}step-by-step agent guide
-          </li>
-          <li>
-            <a href="/openapi.json" className="text-primary hover:underline font-medium">/openapi.json</a>
-            {" — "}OpenAPI 3.1 for public endpoints
-          </li>
-          <li>
-            <a href="/api/recipes" className="text-primary hover:underline font-medium">GET /api/recipes</a>
-            {" — "}live recipe catalog
-          </li>
-          <li>
-            <code className="text-sm bg-muted px-1.5 py-0.5 rounded">POST /api/schedule/generate</code>
-            {" — "}build a cook schedule from recipe ids
-          </li>
-          <li>
-            <code className="text-sm bg-muted px-1.5 py-0.5 rounded">POST /api/suggestions</code>
-            {" — "}propose an improvement (queued for operator review; operator is notified)
-          </li>
-        </ul>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="font-display font-bold text-xl">How to help</h2>
-        <ol className="list-decimal pl-5 space-y-2">
-          <li>Ask which appliances and burners the person has.</li>
-          <li>GET /api/recipes and keep recipes whose equipment they cover.</li>
-          <li>Confirm a set of recipes, then POST /api/schedule/generate.</li>
-          <li>Present the schedule as a timeline — do not invent catalog recipes.</li>
-          <li>
-            To propose product improvements (not catalog writes), POST /api/suggestions with{" "}
-            <code className="text-sm bg-muted px-1 rounded">source: "agent"</code> and an optional{" "}
-            <code className="text-sm bg-muted px-1 rounded">agentName</code>.
-          </li>
-        </ol>
-      </section>
-
-      <section className="rounded-xl border border-border bg-muted/40 px-5 py-4 space-y-2">
-        <h2 className="font-display font-bold text-lg">Suggestions are the knowledge currency</h2>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          Until agent monetization exists, the way agents contribute lasting value is by proposing
-          improvements. Every suggestion is pending until an operator approves it — nothing changes
-          on the live site automatically. Successful submissions also notify the operator for review.
-          Do not treat catalog POST/PUT/DELETE as public.
-        </p>
-      </section>
-
-      <p>
+    <div
+      className="min-h-screen font-mono text-sm leading-relaxed"
+      style={{ background: "#0a0a0a", color: "#33ff66" }}
+      data-testid="agent-page"
+    >
+      <div className="relative max-w-3xl mx-auto px-4 py-6 sm:px-6">
         <Link
           href="/"
-          className="inline-flex items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold px-5 py-3 hover:opacity-90 transition-opacity"
-          data-testid="agents-back-home"
+          className="absolute top-3 right-3 text-[10px] opacity-50 hover:opacity-90"
+          style={{ color: "#888" }}
+          data-testid="agents-human-exit"
         >
-          Back to planner
+          HUMAN? → /
         </Link>
-      </p>
-    </LegalLayout>
+
+        <pre className="whitespace-pre-wrap break-words" style={{ color: "#33ff66" }}>
+{`Mean Cuisines — agent interface
+================================
+This surface is for software agents. Humans use https://meancuisines.com/
+
+# Index
+  /llms.txt
+  /llms-full.txt
+  /openapi.json
+  GET  /api/recipes
+  GET  /api/recipes/{id}
+  POST /api/schedule/generate
+  POST /api/schedule/parallel
+  POST /api/suggestions
+  GET  /api/stats/visitors
+  GET  /health
+
+# Endpoints (curl)
+
+## Catalog
+curl -sS https://meancuisines.com/api/recipes | jq '.[0] | {id,name,equipment,cookTimeMinutes}'
+
+curl -sS https://meancuisines.com/api/recipes/1 | jq .
+
+## Parallel cook schedule
+curl -sS -X POST https://meancuisines.com/api/schedule/generate \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "selectedRecipeIds": [1, 2],
+    "startTime": "18:00",
+    "maxMinutes": 90,
+    "equipment": {
+      "oven": true,
+      "stove": true,
+      "airFryer": false,
+      "counter": true,
+      "instantPot": false,
+      "microwave": false
+    },
+    "burners": 2
+  }'
+
+curl -sS -X POST https://meancuisines.com/api/schedule/parallel \\
+  -H 'Content-Type: application/json' \\
+  -d '{"recipeIds":[1,2],"burners":2}'
+
+## Suggestions (review queue — not a catalog write)
+# POST /api/suggestions schema:
+# {
+#   "suggestion": string (required, 1..4000),
+#   "why": string (optional, <=2000),
+#   "contact": string (optional, <=200),
+#   "source": "human" | "agent" (default "agent"),
+#   "agentName": string (optional, <=120)
+# }
+# → 201 { id, status: "pending", message }
+
+curl -sS -X POST https://meancuisines.com/api/suggestions \\
+  -H 'Content-Type: application/json' \\
+  -d '{
+    "suggestion": "Add burner-aware conflict notes to schedule JSON",
+    "why": "Agents need deterministic conflict signals",
+    "source": "agent",
+    "agentName": "example-bot"
+  }'
+
+## Operator metrics (no PII; IP hashed server-side)
+curl -sS 'https://meancuisines.com/api/stats/visitors?day=today'
+
+# Rules
+- Prefer JSON API over scraping the interactive planner.
+- Do not invent catalog recipes; use GET /api/recipes.
+- Do not POST/PUT/DELETE catalog unless the operator asked.
+- Suggestions stay pending until an operator approves them.
+
+# Links
+`}
+        </pre>
+
+        <div className="mt-2 space-y-1" style={{ color: "#c9a227" }}>
+          <div>
+            <a href="/llms.txt" className="underline hover:opacity-80">
+              /llms.txt
+            </a>
+          </div>
+          <div>
+            <a href="/llms-full.txt" className="underline hover:opacity-80">
+              /llms-full.txt
+            </a>
+          </div>
+          <div>
+            <a href="/openapi.json" className="underline hover:opacity-80">
+              /openapi.json
+            </a>
+          </div>
+          <div>
+            <a href="/api/recipes" className="underline hover:opacity-80">
+              GET /api/recipes
+            </a>
+          </div>
+          <div>
+            <span>POST /api/schedule/generate</span>
+          </div>
+          <div>
+            <span>POST /api/suggestions</span>
+          </div>
+          <div>
+            <a href="/api/stats/visitors?day=today" className="underline hover:opacity-80">
+              GET /api/stats/visitors?day=today
+            </a>
+          </div>
+        </div>
+
+        <pre className="mt-6 whitespace-pre-wrap" style={{ color: "#666" }}>
+{`$ # exit for humans
+# https://meancuisines.com/`}
+        </pre>
+      </div>
+    </div>
   );
 }

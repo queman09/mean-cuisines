@@ -1,7 +1,7 @@
 import { db } from "./db";
-import { contributors, recipes, scheduleSlots, suggestions } from "@shared/schema";
-import type { Contributor, InsertContributor, Recipe, InsertRecipe, ScheduleSlot, InsertScheduleSlot, Suggestion, InsertSuggestion } from "@shared/schema";
-import { eq } from "drizzle-orm";
+import { contributors, recipes, scheduleSlots, suggestions, visits } from "@shared/schema";
+import type { Contributor, InsertContributor, Recipe, InsertRecipe, ScheduleSlot, InsertScheduleSlot, Suggestion, InsertSuggestion, Visit, InsertVisit } from "@shared/schema";
+import { eq, sql } from "drizzle-orm";
 
 export interface IStorage {
   // Contributors
@@ -27,6 +27,10 @@ export interface IStorage {
   createSuggestion(data: InsertSuggestion): Suggestion;
   getSuggestions(status?: string): Suggestion[];
   updateSuggestionStatus(id: number, status: string): Suggestion | undefined;
+
+  // Visits (hashed IP only)
+  recordVisit(data: InsertVisit): Visit;
+  getVisitorStats(day: string): { uniqueVisitors: number; hits: number };
 }
 
 export class DatabaseStorage implements IStorage {
@@ -104,6 +108,25 @@ export class DatabaseStorage implements IStorage {
       .where(eq(suggestions.id, id))
       .returning()
       .get();
+  }
+
+  recordVisit(data: InsertVisit): Visit {
+    return db.insert(visits).values(data).returning().get();
+  }
+
+  getVisitorStats(day: string): { uniqueVisitors: number; hits: number } {
+    const row = db
+      .select({
+        hits: sql<number>`count(*)`,
+        uniqueVisitors: sql<number>`count(distinct ${visits.ipHash})`,
+      })
+      .from(visits)
+      .where(eq(visits.day, day))
+      .get();
+    return {
+      hits: Number(row?.hits ?? 0),
+      uniqueVisitors: Number(row?.uniqueVisitors ?? 0),
+    };
   }
 }
 

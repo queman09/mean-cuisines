@@ -51,6 +51,17 @@ sqlite.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     reviewed_at TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS visits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    day TEXT NOT NULL,
+    ip_hash TEXT NOT NULL,
+    path TEXT NOT NULL DEFAULT '/',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS visits_day_idx ON visits(day);
+  CREATE INDEX IF NOT EXISTS visits_day_ip_idx ON visits(day, ip_hash);
 `);
 
 export const db = drizzle(sqlite, { schema });
