@@ -1410,7 +1410,8 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }));
 
     const phases = buildParallelPlan(enriched, burners);
-    const totalMinutes = enriched.reduce((max, r) => Math.max(max, r.cookTimeMinutes), 0);
+    // Cook-time total must match the cook-map phase sum (phases are sequential).
+    const totalMinutes = phases.reduce((sum, p) => sum + p.estimatedMinutes, 0);
     const sequentialMinutes = enriched.reduce((sum, r) => sum + r.cookTimeMinutes, 0);
 
     res.json({ phases, totalMinutes, sequentialMinutes, recipeCount: selected.length });

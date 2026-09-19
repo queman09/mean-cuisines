@@ -68,14 +68,16 @@ function classifyStep(step: string): { isMise: boolean; isPassive: boolean; isSe
 
 function estimateDuration(step: string, isPassive: boolean): number {
   const hoursMatch = step.match(/(\d+(?:\.\d+)?)\s*hour/i);
-  const minutesMatch = step.match(/(\d+)[\s-]*(?:to[\s-]*(\d+))?\s*min/i);
+  // Decimals ("6.5 minutes") and ranges ("8-10 min" / "8 to 10 min")
+  const minutesMatch = step.match(/(\d+(?:\.\d+)?)(?:\s*(?:-|–|to)\s*(\d+(?:\.\d+)?))?\s*min/i);
   const secondsMatch = step.match(/(\d+)\s*second/i);
 
   if (hoursMatch) return Math.round(parseFloat(hoursMatch[1]) * 60);
   if (minutesMatch) {
-    const lo = parseInt(minutesMatch[1]);
-    const hi = minutesMatch[2] ? parseInt(minutesMatch[2]) : lo;
-    return Math.round((lo + hi) / 2);
+    const lo = parseFloat(minutesMatch[1]);
+    const hi = minutesMatch[2] ? parseFloat(minutesMatch[2]) : lo;
+    // Preserve half-minutes (6.5 stays 6.5; 8-10 → 9)
+    return Math.round(((lo + hi) / 2) * 2) / 2;
   }
   if (secondsMatch) return 1;
   return isPassive ? 20 : 4;
@@ -379,7 +381,13 @@ export function buildParallelPlan(recipes: RecipeInput[], burnerCount = 2): Cook
         durationMinutes: s.duration,
       }));
 
-      const estimatedMinutes = Math.max(...steps.map(s => s.duration));
+      // Wall-clock for the phase: recipes run in parallel, but steps from the
+      // same recipe in one phase are sequential — take max of per-recipe sums.
+      const durationByRecipe = new Map<number, number>();
+      for (const s of steps) {
+        durationByRecipe.set(s.recipeId, (durationByRecipe.get(s.recipeId) ?? 0) + s.duration);
+      }
+      const estimatedMinutes = Math.max(0, ...durationByRecipe.values());
 
       return {
         phaseNumber: idx + 1,

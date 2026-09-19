@@ -484,8 +484,9 @@ function getRecipeImageUrl(name: string, tags: string[] = []): string {
 }
 
 function fmtMins(m: number) {
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60), r = m % 60;
+  const mins = Math.round(m * 2) / 2; // keep half-minutes
+  if (mins < 60) return Number.isInteger(mins) ? `${mins}m` : `${mins}m`;
+  const h = Math.floor(mins / 60), r = Math.round((mins % 60) * 2) / 2;
   return r === 0 ? `${h}h` : `${h}h ${r}m`;
 }
 function fmtElapsed(s: number) {
@@ -595,13 +596,23 @@ function StepEquipment({
           return (
             <div
               key={key}
+              role="checkbox"
+              aria-checked={on}
+              aria-label={info.label}
+              tabIndex={0}
               className={[
-                "relative rounded-xl border-2 p-4 cursor-pointer transition-all select-none",
+                "relative rounded-xl border-2 p-4 cursor-pointer transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 on
                   ? "border-primary bg-primary/5 shadow-sm"
                   : "border-border bg-card hover:border-muted-foreground/40 hover:shadow-sm",
               ].join(" ")}
               onClick={() => onToggle(key)}
+              onKeyDown={(e) => {
+                if (e.key === " " || e.key === "Enter") {
+                  e.preventDefault();
+                  onToggle(key);
+                }
+              }}
               data-testid={`equipment-${key}`}
             >
               {on && (
@@ -972,12 +983,24 @@ function StepRecipes({
             return (
               <div
                 key={recipe.id}
+                role="checkbox"
+                aria-checked={isSelected}
+                aria-disabled={isDisabled}
+                aria-label={`${recipe.name}${isSelected ? ", selected" : ""}`}
+                tabIndex={isDisabled ? -1 : 0}
                 className={[
-                  "rounded-xl border-2 overflow-hidden bg-card transition-all duration-150 flex flex-col",
+                  "rounded-xl border-2 overflow-hidden bg-card transition-all duration-150 flex flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                   isDisabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md",
                   isSelected ? `${pal!.border} shadow-sm ring-2 ${pal!.ring}` : "border-border",
                 ].join(" ")}
                 onClick={() => !isDisabled && onToggle(recipe.id)}
+                onKeyDown={(e) => {
+                  if (isDisabled) return;
+                  if (e.key === " " || e.key === "Enter") {
+                    e.preventDefault();
+                    onToggle(recipe.id);
+                  }
+                }}
                 data-testid={`recipe-card-${recipe.id}`}
               >
                 {/* Recipe image — Unsplash matched by recipe name */}
@@ -1115,7 +1138,10 @@ function GamePlanView({
   onBack: () => void;
 }) {
   const [subPage, setSubPage] = useState<"shopping" | "map">("shopping");
-  const timeSaved = Math.max(0, sequentialMinutes - totalMinutes);
+  // Prefer phase-sum so the shopping "Cook time" matches the cook-map phase totals.
+  const phaseTotalMinutes = phases.reduce((sum, p) => sum + p.estimatedMinutes, 0);
+  const cookTotalMinutes = phaseTotalMinutes > 0 ? phaseTotalMinutes : totalMinutes;
+  const timeSaved = Math.max(0, sequentialMinutes - cookTotalMinutes);
   const lowerPantry = pantry.map(p => p.toLowerCase());
 
   const allIngredients = selectedRecipes.flatMap(r => {
@@ -1142,7 +1168,7 @@ function GamePlanView({
         <div className="text-xs text-muted-foreground">Recipes</div>
       </div>
       <div className="rounded-xl bg-card border border-border p-3 text-center">
-        <div className="text-xl font-bold font-display">{fmtMins(totalMinutes)}</div>
+        <div className="text-xl font-bold font-display">{fmtMins(cookTotalMinutes)}</div>
         <div className="text-xs text-muted-foreground">Cook time</div>
       </div>
       <div className="rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 p-3 text-center">
@@ -1216,9 +1242,18 @@ function GamePlanView({
         {alreadyHave.length > 0 && (
           <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 mb-6">
             <p className="text-xs text-muted-foreground font-medium mb-2">✓ Already in your pantry ({alreadyHave.length})</p>
-            <div className="flex flex-wrap gap-x-3 gap-y-1">
+            <div className="flex flex-wrap gap-x-3 gap-y-2">
               {alreadyHave.map((ing, i) => (
-                <span key={i} className="text-xs text-muted-foreground/50 line-through">{ing.name}</span>
+                <span key={i} className="text-xs text-muted-foreground inline-flex items-baseline gap-1 flex-wrap">
+                  <span className="line-through opacity-60">
+                    {ing.qty > 0 ? `${ing.qty}${ing.unit ? ` ${ing.unit}` : ""} ` : ""}{ing.name}
+                  </span>
+                  {!(ing.qty > 0) && (
+                    <span className="no-underline opacity-100 italic text-amber-700 dark:text-amber-400">
+                      · check you have enough
+                    </span>
+                  )}
+                </span>
               ))}
             </div>
           </div>
